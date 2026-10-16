@@ -68,7 +68,7 @@ button.sm{font-size:.8rem;padding:4px 9px}
 .legs{display:grid;gap:10px}
 .leg{display:grid;gap:4px;padding-bottom:9px;border-bottom:1px solid var(--line)}
 .leg:last-child{border-bottom:none;padding-bottom:0}
-.leg .l1{display:grid;grid-template-columns:62px 62px 1fr 1fr 52px 26px 26px;gap:6px;align-items:center}
+.leg .l1{display:grid;grid-template-columns:62px 62px minmax(0,1.6fr) minmax(0,1fr) 52px 26px 26px;gap:6px;align-items:center}
 .leg .l1 select,.leg .l1 input{padding:6px 5px;font-size:.84rem}
 .leg .l2{font-family:var(--num);font-size:.78rem;color:var(--muted);display:flex;gap:12px;flex-wrap:wrap}
 .leg.off{opacity:.45}
@@ -858,13 +858,21 @@ $('tapB').onclick=()=>{tapSide='B';$('tapB').classList.add('on');$('tapS').class
 $('tapS').onclick=()=>{tapSide='S';$('tapS').classList.add('on');$('tapB').classList.remove('on')};
 
 // ---------------- render: legs & position ----------------
+// strike dropdown: every strike NSE lists for this expiry, with that option's LTP; ATM marked
+function strikeOpts(l){
+  const t=l.type.toLowerCase(),a=nearestK(mkt.spot);
+  const ks=ch&&ch.rows.length?ch.rows.filter(r=>r[t]&&r[t].ltp>0).map(r=>r.k):[];
+  if(!ks.includes(l.k))ks.push(l.k);ks.sort((x,y)=>x-y);
+  return ks.map(k=>{const q=quote(l.type,k),tag=k===a?' ATM':(l.type==='CE'?k<mkt.spot:k>mkt.spot)?' ITM':'';
+    return `<option value="${k}"${k===l.k?' selected':''}>${k}${q!=null?' · '+num(q):''}${tag}</option>`}).join('');
+}
 function renderLegs(){
   const box=$('legs');
   if(!legs.length){box.innerHTML='<p class="note">No legs yet. Load a suggestion, tap a price in the option chain, or add a leg.</p>';return}
   box.innerHTML=legs.map((l,i)=>`<div class="leg ${l.on?'':'off'}"><div class="l1">
    <select id="sd${i}" data-i="${i}" data-f="side" class="${l.side==='B'?'buy':'sell'}" aria-label="Side"><option value="B"${l.side==='B'?' selected':''}>Buy</option><option value="S"${l.side==='S'?' selected':''}>Sell</option></select>
    <select id="ty${i}" data-i="${i}" data-f="type" aria-label="Type"><option${l.type==='CE'?' selected':''}>CE</option><option${l.type==='PE'?' selected':''}>PE</option><option${l.type==='FUT'?' selected':''}>FUT</option></select>
-   <input id="k${i}" data-i="${i}" data-f="k" type="number" step="${STEP}" value="${l.type==='FUT'?'':l.k}" ${l.type==='FUT'?'disabled placeholder="—"':''} aria-label="Strike">
+   ${l.type==='FUT'?`<select id="k${i}" disabled aria-label="Strike"><option>FUT</option></select>`:`<select id="k${i}" data-i="${i}" data-f="k" aria-label="Strike">${strikeOpts(l)}</select>`}
    <input id="px${i}" data-i="${i}" data-f="px" type="number" step="0.05" value="${l.px}" aria-label="Entry price">
    <input id="lt${i}" data-i="${i}" data-f="lots" type="number" min="1" step="1" value="${l.lots}" aria-label="Lots">
    <input id="on${i}" type="checkbox" data-i="${i}" data-f="on" ${l.on?'checked':''} style="width:auto" aria-label="Include leg">
