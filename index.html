@@ -165,6 +165,18 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
 </div>
 
 <div class="stack">
+  <section class="panel" id="drawBox">
+    <div class="toolbar" style="justify-content:space-between"><h2>Draw your payoff</h2><span class="note">Above the line = profit, below = loss. Spot is the dotted line.</span></div>
+    <div class="toolbar" id="shapes"></div>
+    <canvas id="dcv" style="height:280px;touch-action:none;border-radius:6px" aria-label="Payoff drawing pad"></canvas>
+    <div class="toolbar">
+      <button class="sm" id="dClear">Clear</button>
+      <label class="f" style="width:96px">Max legs<select id="dLegs"><option>2</option><option>3</option><option selected>4</option></select></label>
+      <label class="note" style="display:flex;gap:6px;align-items:center"><input id="dSell" type="checkbox" checked style="width:auto">Allow selling</label>
+      <button class="sm pri" id="dFind">Find strategy</button>
+    </div>
+    <div id="dRes" style="display:grid;gap:10px"></div>
+  </section>
   <section class="panel">
     <div class="toolbar" style="justify-content:space-between">
       <h2>Position</h2>
@@ -748,6 +760,132 @@ function renderHist(){
     `<tr style="font-weight:600"><td>${hist.length} trades · ${wins} wins</td><td></td><td></td><td class="${cls(tot)}">${inr(tot)}</td></tr>`:'';
 }
 
+// ---------------- Draw your payoff: sketch a shape, find matching strikes ----------------
+const DN=60;let dT=new Array(DN+1).fill(null),dRes=[],dSel=0,dView=null,dDrawing=false,dLast=null;
+function dRange(){const S=mkt.spot,T=Math.max(dteDays(),0.5)/365,v=((feats&&feats.atmIV)||mkt.vix||13)/100,w=Math.max(S*v*Math.sqrt(T)*2.5,S*0.025);return{lo:S-w,hi:S+w}}
+const dYmax=()=>Math.max(+cfg.budget||20000,5000);
+function drawPad(){
+  const cv=$('dcv');if(!cv||!mkt)return;const dpr=window.devicePixelRatio||1,W=cv.clientWidth,H=cv.clientHeight;if(!W)return;
+  cv.width=W*dpr;cv.height=H*dpr;const c=cv.getContext('2d');c.setTransform(dpr,0,0,dpr,0,0);
+  const cs=getComputedStyle(document.documentElement),col=n=>cs.getPropertyValue(n).trim();c.clearRect(0,0,W,H);
+  const {lo,hi}=dRange(),Y=dYmax(),L=58,R=10,Tp=10,B=24;
+  const X=x=>L+(x-lo)/(hi-lo)*(W-L-R),YY=y=>Tp+(Y-clamp(y,-1.15*Y,1.15*Y))/(2*Y)*(H-Tp-B);
+  dView={lo,hi,L,R,Tp,B,W,H,Y};
+  c.fillStyle=col('--profit-fill');c.fillRect(L,Tp,W-L-R,YY(0)-Tp);c.fillStyle=col('--loss-fill');c.fillRect(L,YY(0),W-L-R,H-B-YY(0));
+  c.font='11px '+col('--num');c.fillStyle=col('--muted');c.strokeStyle=col('--line');c.lineWidth=1;c.textAlign='right';c.textBaseline='middle';
+  for(const f of[1,.5,0,-.5,-1]){const y=f*Y;c.beginPath();c.moveTo(L,YY(y));c.lineTo(W-R,YY(y));c.stroke();const a=Math.abs(y);c.fillText((y<0?'−':y>0?'+':'')+(a>=1e5?(a/1e5).toFixed(1)+'L':(a/1e3).toFixed(0)+'k'),L-6,YY(y))}
+  const st=(hi-lo)>1500?500:(hi-lo)>700?200:100;c.textAlign='center';c.textBaseline='top';
+  for(let x=Math.ceil(lo/st)*st;x<=hi;x+=st){c.beginPath();c.moveTo(X(x),Tp);c.lineTo(X(x),H-B);c.stroke();c.fillText(x.toFixed(0),X(x),H-B+6)}
+  c.strokeStyle=col('--muted');c.lineWidth=1.3;c.beginPath();c.moveTo(L,YY(0));c.lineTo(W-R,YY(0));c.stroke();
+  c.setLineDash([2,3]);c.strokeStyle=col('--accent');c.beginPath();c.moveTo(X(mkt.spot),Tp);c.lineTo(X(mkt.spot),H-B);c.stroke();c.setLineDash([]);
+  c.fillStyle=col('--profit');c.textAlign='left';c.fillText('PROFIT',L+6,Tp+4);c.fillStyle=col('--loss');c.textBaseline='bottom';c.fillText('LOSS',L+6,H-B-4);
+  // matched strategy overlay
+  const m=dRes[dSel];
+  if(m){c.lineWidth=2.2;let px=null,py=null;for(let i=0;i<=120;i++){const x=lo+(hi-lo)*i/120,y=expiryPL(x,m.legs);
+    if(px!=null){c.strokeStyle=col(y>=0?'--profit':'--loss');c.beginPath();c.moveTo(px,py);c.lineTo(X(x),YY(y));c.stroke()}px=X(x);py=YY(y)}}
+  // user's drawing
+  c.strokeStyle=col('--fg');c.lineWidth=m?2:3;c.lineJoin='round';c.lineCap='round';if(m)c.setLineDash([5,4]);c.beginPath();let on=false;
+  for(let i=0;i<=DN;i++){if(dT[i]==null){on=false;continue}const x=X(lo+(hi-lo)*i/DN),y=YY(dT[i]);on?c.lineTo(x,y):c.moveTo(x,y);on=true}
+  c.stroke();c.setLineDash([]);
+  if(dT.every(v=>v==null)){c.fillStyle=col('--muted');c.font='15px '+col('--ui');c.textAlign='center';c.textBaseline='middle';
+    c.fillText('Draw your profit / loss shape here, left to right',L+(W-L-R)/2,Tp+(H-Tp-B)*0.3)}
+}
+function dPoint(e){
+  if(!dView)return;const r=$('dcv').getBoundingClientRect(),v=dView,px=e.clientX-r.left,py=e.clientY-r.top;
+  const i=Math.round(clamp((px-v.L)/(v.W-v.L-v.R),0,1)*DN),y=clamp(v.Y-(py-v.Tp)/(v.H-v.Tp-v.B)*2*v.Y,-v.Y,v.Y);
+  if(dLast){const[a,ya]=dLast,n=Math.abs(i-a);for(let j=1;j<n;j++){const k=a+Math.sign(i-a)*j;dT[k]=ya+(y-ya)*j/n}}
+  dT[i]=y;dLast=[i,y];
+}
+$('dcv').addEventListener('pointerdown',e=>{e.preventDefault();dDrawing=true;dLast=null;dRes=[];$('dRes').innerHTML='';try{$('dcv').setPointerCapture(e.pointerId)}catch(x){}dPoint(e);drawPad()});
+$('dcv').addEventListener('pointermove',e=>{if(!dDrawing)return;e.preventDefault();dPoint(e);drawPad()});
+['pointerup','pointercancel','pointerleave'].forEach(k=>$('dcv').addEventListener(k,()=>{dDrawing=false;dLast=null}));
+const SHAPES={
+ 'Rise':u=>Math.max(-.25,-.25+1.25*u),
+ 'Fall':u=>Math.max(-.25,-.25-1.25*u),
+ 'Rise, capped':u=>clamp(-.3+(u+.15)*1.3,-.3,.45),
+ 'Fall, capped':u=>clamp(-.3+(-u+.15)*1.3,-.3,.45),
+ 'Stay in range':u=>clamp(.3-(Math.abs(u)-.3)*2,-.6,.3),
+ 'Big move':u=>Math.min(1,-.3+Math.max(0,Math.abs(u)-.2)*1.6),
+};
+$('shapes').innerHTML=Object.keys(SHAPES).map(n=>`<button class="sm" data-shape="${n}">${n}</button>`).join('');
+$('shapes').addEventListener('click',e=>{const n=e.target.dataset.shape;if(!n)return;const Y=dYmax();
+  dT=dT.map((_,i)=>SHAPES[n](-1+2*i/DN)*Y);dRes=[];$('dRes').innerHTML='';drawPad()});
+$('dClear').onclick=()=>{dT=new Array(DN+1).fill(null);dRes=[];$('dRes').innerHTML='';drawPad()};
+
+function dInterp(){
+  const idx=dT.map((v,i)=>v==null?-1:i).filter(i=>i>=0);if(idx.length<DN*0.5)return null;
+  const t=dT.slice();for(let i=0;i<=DN;i++){if(t[i]!=null)continue;
+    const a=idx.filter(j=>j<i).pop(),b=idx.find(j=>j>i);t[i]=a==null?dT[b]:b==null?dT[a]:dT[a]+(dT[b]-dT[a])*(i-a)/(b-a)}
+  return t}
+function solveDraw(){
+  const t=dInterp();if(!t)return{err:'Draw across at least half the width of the pad, left to right.'};
+  if(!ch||!ch.rows.length)return{err:'Option chain not loaded yet.'};
+  const {lo,hi}=dRange(),span=hi-lo,G=[],T=[],Wt=[],ext=15,ef=0.3;
+  for(let i=0;i<=DN;i++){G.push(lo+span*i/DN);T.push(t[i]);Wt.push(1)}
+  const sr=(t[DN]-t[DN-6])/6,sl=(t[6]-t[0])/6,stepCols=ef*DN/ext;
+  for(let j=1;j<=ext;j++){G.push(hi+span*ef*j/ext);T.push(t[DN]+sr*stepCols*j);Wt.push(0.6);G.push(lo-span*ef*j/ext);T.push(t[0]-sl*stepCols*j);Wt.push(0.6)}
+  const n=G.length,lt=lot(),dot=(a,b)=>{let s=0;for(let i=0;i<n;i++)s+=Wt[i]*a[i]*b[i];return s},nT=Math.sqrt(dot(T,T));
+  if(nT<1)return{err:'The drawing is flat on zero. Draw where you want profit and loss.'};
+  let rows=ch.rows.filter(r=>r.k>=lo-50&&r.k<=hi+50);if(rows.length>26)rows=rows.filter(r=>r.k%100===0);
+  const ins=[];for(const r of rows)for(const ty of['CE','PE']){const o=r[ty.toLowerCase()];if(!o||!(o.ltp>0))continue;
+    const v=new Float64Array(n);for(let i=0;i<n;i++)v[i]=((ty==='CE'?Math.max(G[i]-r.k,0):Math.max(r.k-G[i],0))-o.ltp)*lt;ins.push({ty,k:r.k,px:o.ltp,v})}
+  const maxLegs=+$('dLegs').value,sell=$('dSell').checked,BW=40;
+  const score=(P,legs)=>{const nP=Math.sqrt(dot(P,P));return nP<1?-1:dot(P,T)/(nP*nT)-0.012*legs};
+  let beam=[{q:{},P:new Float64Array(n),legs:0,lots:0,s:-1}],best=new Map();
+  for(let d=0;d<maxLegs+3;d++){const next=new Map();
+    for(const st of beam)for(let i=0;i<ins.length;i++)for(const dq of sell?[1,-1]:[1]){
+      const q0=st.q[i]||0,q1=q0+dq;if(Math.abs(q1)>3)continue;
+      const legs=st.legs+(q0===0?1:0)-(q1===0?1:0);if(legs>maxLegs||legs===0)continue;
+      const lots=st.lots-Math.abs(q0)+Math.abs(q1);if(lots>6)continue;
+      const q={...st.q};if(q1)q[i]=q1;else delete q[i];
+      const key=Object.keys(q).sort((a,b)=>a-b).map(k=>k+':'+q[k]).join(',');if(next.has(key)||best.has(key)&&d>0&&next.size>4000)continue;
+      const P=new Float64Array(st.P);const v=ins[i].v;for(let j=0;j<n;j++)P[j]+=dq*v[j];
+      next.set(key,{q,P,legs,lots,s:score(P,legs),key})}
+    beam=[...next.values()].sort((a,b)=>b.s-a.s).slice(0,BW);for(const b of beam)if(!best.has(b.key)||best.get(b.key).s<b.s)best.set(b.key,b)}
+  const sig=b=>Object.keys(b.q).map(i=>ins[i].ty+(b.q[i]>0?'B':'S')).sort().join('');
+  const out=[],seenSig=new Set();
+  for(const b of[...best.values()].sort((a,b)=>b.s-a.s)){
+    const sg=sig(b)+Object.keys(b.q).length;if(seenSig.has(sg)&&out.length)continue;
+    const g=Object.values(b.q).reduce((a,x)=>gcd(a,Math.abs(x)),0)||1;
+    const raw=dot(b.P,T)/dot(b.P,b.P)*g,m=clamp(Math.round(raw),1,10);
+    const legs=Object.entries(b.q).map(([i,qq])=>{const it=ins[+i],lots=Math.abs(qq)/g*m;return{on:true,side:qq>0?'B':'S',type:it.ty,k:it.k,lots,px:it.px}}).sort((a,c)=>a.k-c.k||a.type.localeCompare(c.type));
+    out.push({legs,fit:clamp(b.s+0.012*b.legs,0,0.99),a:analyse(legs),big:raw<0.7?1/Math.max(raw,0.05):0});seenSig.add(sg);if(out.length>=3)break}
+  return{out,n:ins.length}
+}
+const gcd=(a,b)=>b?gcd(b,a%b):a;
+function nameOf(legs){
+  const b=legs.filter(l=>l.side==='B'),s=legs.filter(l=>l.side==='S'),c=legs.filter(l=>l.type==='CE'),p=legs.filter(l=>l.type==='PE');
+  const lots=x=>x.reduce((a,l)=>a+l.lots,0);
+  if(legs.length===1)return(b.length?'Long ':'Short ')+(c.length?'Call':'Put');
+  if(legs.length===2&&c.length===2&&b.length===1){const lb=b[0],ls=s[0];if(lb.lots===ls.lots)return lb.k<ls.k?'Bull Call Spread':'Bear Call Spread';return lots(b)>lots(s)?'Call Ratio Backspread':'Call Ratio Spread'}
+  if(legs.length===2&&p.length===2&&b.length===1){const lb=b[0],ls=s[0];if(lb.lots===ls.lots)return lb.k>ls.k?'Bear Put Spread':'Bull Put Spread';return lots(b)>lots(s)?'Put Ratio Backspread':'Put Ratio Spread'}
+  if(legs.length===2&&c.length===1&&p.length===1){const same=c[0].k===p[0].k;
+    if(b.length===2)return same?(c[0].lots>p[0].lots?'Strap':c[0].lots<p[0].lots?'Strip':'Long Straddle'):'Long Strangle';
+    if(s.length===2)return same?'Short Straddle':'Short Strangle';
+    return c[0].side==='B'?'Synthetic long (risk reversal)':'Synthetic short (risk reversal)'}
+  if(legs.length===4&&c.length===2&&p.length===2&&s.length===2)return s[0].k===s[1].k?'Iron Fly':'Iron Condor';
+  return'Custom '+legs.length+'-leg';
+}
+$('dFind').onclick=()=>{
+  const r=solveDraw(),box=$('dRes');
+  if(r.err){box.innerHTML=`<div class="banner">${esc(r.err)}</div>`;dRes=[];drawPad();return}
+  dRes=r.out;dSel=0;drawPad();
+  box.innerHTML=`<p class="note">${r.n} options checked on the ${esc($('expiry').value)} chain. Solid line = strategy at expiry, dashed = your drawing. Tap a card to compare it.</p>`+
+   dRes.map((m,i)=>`<div class="sug${i===0?' top':''}" data-dsel="${i}" style="cursor:pointer">
+    <div class="sug-h"><strong>${i+1}. ${esc(nameOf(m.legs))}</strong><span class="flag">${Math.floor(m.fit*100)}% shape match</span></div>
+    <div class="bar"><i style="width:${Math.round(m.fit*100)}%"></i></div>
+    <ol class="orders">${m.legs.map(l=>`<li>${l.side==='B'?'Buy':'Sell'} ${l.lots}× ${l.k} ${l.type} @ ${num(l.px)}</li>`).join('')}</ol>
+    <div class="m"><span>Max P <b class="pos">${inr(m.a.mx)}</b></span><span>Max L <b class="neg">${inr(m.a.mn)}</b></span><span>${m.a.net>=0?'Credit':'Debit'} <b>${inr(Math.abs(m.a.net))}</b></span><span>BE <b>${m.a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span><span>POP <b>${m.a.pop==null?'—':(m.a.pop*100).toFixed(0)+'%'}</b></span></div>
+    ${m.big?`<p class="note">Same shape, but even the minimum size (1 lot = ${lot()} units) swings about ${m.big.toFixed(1)}× more rupees than your drawing.</p>`:''}
+    ${isFinite(m.a.mn)&&-m.a.mn>(+cfg.budget||20000)?`<p class="note" style="color:var(--loss)">Max loss is above your ₹${(+cfg.budget||20000).toLocaleString('en-IN')} budget.</p>`:''}
+    ${!isFinite(m.a.mn)?'<p class="note" style="color:var(--loss)">Unlimited loss on one side, because your drawing keeps falling at the edge.</p>':''}
+    <div class="toolbar"><button class="sm pri" data-dtake="${i}">Take trade</button><button class="sm" data-dload="${i}">Load into builder</button></div></div>`).join('');
+};
+$('dRes').addEventListener('click',e=>{const t=e.target;
+  if(t.dataset.dtake!=null){const m=dRes[+t.dataset.dtake];takeTrade(t,nameOf(m.legs),m.legs);return}
+  if(t.dataset.dload!=null){legs=dRes[+t.dataset.dload].legs.map(l=>({...l}));renderLegs();renderPos();$('legs').scrollIntoView({behavior:'smooth',block:'start'});return}
+  const card=t.closest('[data-dsel]');if(card){dSel=+card.dataset.dsel;[...$('dRes').querySelectorAll('[data-dsel]')].forEach(c=>c.classList.toggle('top',c===card));drawPad()}});
+
 // ---------------- P&L ----------------
 const sgn=l=>l.side==='B'?1:-1;
 const lot=()=>+cfg.lot||65;
@@ -950,13 +1088,13 @@ function readout(ev){if(!view)return;const r=$('cv').getBoundingClientRect(),cx=
 ['dfw','ivs'].forEach(id=>$(id).addEventListener('input',renderPos));
 
 // ---------------- orchestration ----------------
-function renderAll(){feats=features();renderStatus();renderStrip(feats);renderTrade(feats);renderHist();renderRead(feats);renderLU(feats);renderSugs(feats);renderEvents(feats);renderNews(feats);renderChain();renderPos()}
+function renderAll(){feats=features();renderStatus();renderStrip(feats);renderTrade(feats);renderHist();renderRead(feats);renderLU(feats);renderSugs(feats);renderEvents(feats);renderNews(feats);renderChain();renderPos();drawPad()}
 let busy=false;
 async function refreshChain(){if(busy)return;busy=true;try{await loadChain();renderAll()}finally{busy=false}}
 async function refreshAll(){if(busy)return;busy=true;try{await loadContext();if(!expiriesTried)await loadExpiries();await loadChain();renderAll()}finally{busy=false}}
 $('refresh').onclick=()=>{expiriesTried=false;refreshAll()};
 $('expiry').addEventListener('change',()=>{store.set('expiry',$('expiry').value);refreshChain()});
-window.addEventListener('resize',()=>{if(mkt)renderPos()});
+window.addEventListener('resize',()=>{if(mkt){renderPos();drawPad()}});
 // settings
 function bindSetting(id,key,parse){const el=$(id);el.value=cfg[key];el.addEventListener('change',()=>{cfg[key]=parse(el.value)||DEF[key];el.value=cfg[key];store.set('cfg',cfg);
   if(key==='worker'){expiriesTried=false;refreshAll()}else if(mkt){enrichChain();renderAll()}})}
