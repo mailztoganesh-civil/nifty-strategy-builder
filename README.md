@@ -25,3 +25,4 @@ Live NIFTY 50 option strategy builder and suggester, hosted on GitHub Pages.
 If the Worker URL differs, set it in the app under Settings.
 
 Rules-based suggestions only; not trading advice.
+good
