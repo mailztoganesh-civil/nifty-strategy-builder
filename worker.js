@@ -6,6 +6,7 @@
 //   /news                Latest Indian market headlines (Google News RSS)
 //   /calendar            High-impact global events this week + next (Forex Factory feed)
 //   /context             market + news + calendar in one call
+//   /debug               which data sources are working
 // Written without template literals so it survives copy-paste into the Cloudflare editor.
 
 var NSE = 'https://www.nseindia.com';
@@ -121,25 +122,65 @@ function tag(s, name) {
   return m[1].replace(/<!\[CDATA\[|\]\]>/g, '').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&lt;/g, '<').replace(/&gt;/g, '>').trim();
 }
 
-async function news() {
-  var q = encodeURIComponent('(Nifty OR Sensex OR RBI OR "Indian stock market" OR FII) when:1d');
-  var u = 'https://news.google.com/rss/search?q=' + q + '&hl=en-IN&gl=IN&ceid=IN:en';
-  var r = await fetch(u, { headers: { 'User-Agent': UA } });
-  var x = await r.text();
-  var items = x.split('<item>').slice(1, 41);
-  var out = [];
-  for (var i = 0; i < items.length; i++) {
-    out.push({ title: tag(items[i], 'title'), link: tag(items[i], 'link'), time: tag(items[i], 'pubDate'), source: tag(items[i], 'source') });
-  }
-  return { items: out };
+var FEEDS = [
+  { name: 'Google News', url: 'https://news.google.com/rss/search?q=' + encodeURIComponent('(Nifty OR Sensex OR RBI OR "Indian stock market" OR FII) when:1d') + '&hl=en-IN&gl=IN&ceid=IN:en' },
+  { name: 'Economic Times', url: 'https://economictimes.indiatimes.com/markets/rssfeeds/1977021501.cms' },
+  { name: 'Moneycontrol', url: 'https://www.moneycontrol.com/rss/marketreports.xml' },
+  { name: 'Livemint', url: 'https://www.livemint.com/rss/markets' },
+  { name: 'Business Standard', url: 'https://www.business-standard.com/rss/markets-106.rss' },
+  { name: 'Bing News', url: 'https://www.bing.com/news/search?q=Nifty+Sensex+market&format=rss&mkt=en-IN' }
+];
+
+async function feed(f) {
+  try {
+    var r = await fetch(f.url, { headers: { 'User-Agent': UA, 'Accept': 'application/rss+xml, application/xml, text/xml, */*' } });
+    var x = await r.text();
+    var items = x.split(/<item[\s>]/).slice(1, 26);
+    var out = [];
+    for (var i = 0; i < items.length; i++) {
+      var t = tag(items[i], 'title');
+      if (t) out.push({ title: t, link: tag(items[i], 'link'), time: tag(items[i], 'pubDate'), source: tag(items[i], 'source') || f.name });
+    }
+    return { name: f.name, status: r.status, items: out };
+  } catch (e) { return { name: f.name, status: 'error ' + (e.message || e), items: [] }; }
 }
 
+async function news(debug) {
+  var res = await Promise.all(FEEDS.map(feed));
+  var seen = {}, out = [], dayAgo = Date.now() - 36 * 3600000;
+  for (var i = 0; i < res.length; i++) {
+    for (var j = 0; j < res[i].items.length; j++) {
+      var it = res[i].items[j], key = it.title.toLowerCase().slice(0, 60);
+      var tm = Date.parse(it.time);
+      if (seen[key] || (tm && tm < dayAgo)) continue;
+      seen[key] = 1; out.push(it);
+    }
+  }
+  out.sort(function (a, b) { return (Date.parse(b.time) || 0) - (Date.parse(a.time) || 0); });
+  var o = { items: out.slice(0, 40) };
+  if (debug) o.sources = res.map(function (r) { return { name: r.name, status: r.status, items: r.items.length }; });
+  return o;
+}
+
+var ffStatus = {};
 async function ff(file) {
+  var key = 'https://cache.nifty-proxy/' + file;
+  var cache = caches.default;
   try {
-    var r = await fetch('https://nfs.faireconomy.media/' + file, { headers: { 'User-Agent': UA } });
-    if (!r.ok) return [];
-    return await r.json();
-  } catch (e) { return []; }
+    var hit = await cache.match(key);
+    if (hit) { ffStatus[file] = 'cached'; return await hit.json(); }
+  } catch (e) {}
+  try {
+    var r = await fetch('https://nfs.faireconomy.media/' + file, { headers: { 'User-Agent': UA, 'Accept': 'application/json' } });
+    var txt = await r.text();
+    ffStatus[file] = r.status;
+    var j = JSON.parse(txt);
+    if (Array.isArray(j) && j.length) {
+      try { await cache.put(key, new Response(JSON.stringify(j), { headers: { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=3600' } })); } catch (e) {}
+      return j;
+    }
+    return [];
+  } catch (e) { ffStatus[file] = ffStatus[file] || ('error ' + (e.message || e)); return []; }
 }
 
 async function calendar() {
@@ -151,7 +192,7 @@ async function calendar() {
     var e = all[i];
     if (e.impact === 'High' && keep.indexOf(e.country) >= 0) out.push({ title: e.title, country: e.country, date: e.date, impact: e.impact, forecast: e.forecast, previous: e.previous });
   }
-  return { events: out };
+  return { events: out, status: ffStatus };
 }
 
 async function settle(p) { try { return await p; } catch (e) { return { error: String(e.message || e) }; } }
@@ -166,12 +207,17 @@ export default {
       if (p === '/chain') return cors(await chain(url.searchParams.get('expiry')), 200, 5);
       if (p === '/market') return cors(await market(), 200, 30);
       if (p === '/news') return cors(await news(), 200, 300);
+      if (p === '/debug') {
+        var d = await Promise.all([settle(news(true)), settle(calendar()), settle(chain(null))]);
+        var c = d[2];
+        return cors({ news: d[0].sources || d[0], newsCount: (d[0].items || []).length, calendar: { count: (d[1].events || []).length, status: d[1].status || d[1].error }, nseChain: c.error ? c.error : { expiry: c.expiry, spot: c.spot, strikes: c.rows.length } });
+      }
       if (p === '/calendar') return cors(await calendar(), 200, 1800);
       if (p === '/context') {
         var r = await Promise.all([settle(market()), settle(news()), settle(calendar())]);
         return cors({ market: r[0], news: r[1], calendar: r[2] }, 200, 30);
       }
-      return cors({ ok: true, routes: ['/expiries', '/chain?expiry=DD-Mon-YYYY', '/market', '/news', '/calendar', '/context'] });
+      return cors({ ok: true, routes: ['/expiries', '/chain?expiry=DD-Mon-YYYY', '/market', '/news', '/calendar', '/context', '/debug'] });
     } catch (e) {
       return cors({ error: String(e.message || e) }, 502);
     }
