@@ -115,6 +115,7 @@ label.f{display:grid;gap:3px;min-width:0;font-size:.7rem;color:var(--muted);text
 .orders{margin:0;padding-left:20px;font-family:var(--num);font-size:.82rem;display:grid;gap:3px}
 table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8rem;color:var(--muted)}
 .toast{position:fixed;left:16px;right:16px;bottom:0;margin:0 auto;max-width:640px;z-index:9;background:var(--fg);color:var(--bg);padding:12px 14px calc(12px + env(safe-area-inset-bottom,0px));border-radius:10px 10px 0 0;font-size:.9rem;font-weight:600}
+.tgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
 .banner{border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:8px 11px;font-size:.84rem}
 @media(max-width:560px){.leg .l1{grid-template-columns:64px 60px 1fr 1fr}.leg .l1 .x{justify-self:start}}
 @media(max-width:430px){.read li{grid-template-columns:80px 1fr}}
@@ -165,6 +166,17 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
 </div>
 
 <div class="stack">
+  <section class="panel" id="tgBox">
+    <div class="toolbar" style="justify-content:space-between"><h2>Strategy from your numbers</h2><span class="note">Lots are sized to keep within your max loss.</span></div>
+    <div class="tgrid">
+      <label class="f">Max loss ₹<input id="tgLoss" type="number" step="1000" min="1000" value="10000"></label>
+      <label class="f">Target profit ₹<input id="tgProfit" type="number" step="1000" min="0" value="10000"></label>
+      <label class="f">Market view<select id="tgView"><option value="auto">Use market read</option><option value="bull">Bullish</option><option value="bear">Bearish</option><option value="neutral">Range-bound</option><option value="move">Big move</option><option value="any">Any</option></select></label>
+      <label class="note" style="display:flex;gap:6px;align-items:center;align-self:end;padding-bottom:8px"><input id="tgUnl" type="checkbox" style="width:auto">Unlimited profit</label>
+    </div>
+    <div class="toolbar"><button class="sm pri" id="tgFind">Suggest strategy</button></div>
+    <div id="tgRes" style="display:grid;gap:10px"></div>
+  </section>
   <section class="panel" id="drawBox">
     <div class="toolbar" style="justify-content:space-between"><h2>Draw your payoff</h2><span class="note">Above the line = profit, below = loss. Spot is the dotted line.</span></div>
     <div class="toolbar" id="shapes"></div>
@@ -885,6 +897,86 @@ $('dRes').addEventListener('click',e=>{const t=e.target;
   if(t.dataset.dtake!=null){const m=dRes[+t.dataset.dtake];takeTrade(t,nameOf(m.legs),m.legs);return}
   if(t.dataset.dload!=null){legs=dRes[+t.dataset.dload].legs.map(l=>({...l}));renderLegs();renderPos();$('legs').scrollIntoView({behavior:'smooth',block:'start'});return}
   const card=t.closest('[data-dsel]');if(card){dSel=+card.dataset.dsel;[...$('dRes').querySelectorAll('[data-dsel]')].forEach(c=>c.classList.toggle('top',c===card));drawPad()}});
+
+// ---------------- Strategy from your numbers: max loss + target profit ----------------
+const TG_CAT={'Long Call':'bull','Bull Call Spread':'bull','Bull Put Spread':'bull','Call Ratio Backspread':'bull',
+  'Long Put':'bear','Bear Put Spread':'bear','Bear Call Spread':'bear','Put Ratio Backspread':'bear',
+  'Iron Condor':'neutral','Iron Fly':'neutral','Call Butterfly':'neutral','Put Butterfly':'neutral',
+  'Long Straddle':'move','Long Strangle':'move'};
+function tgCandidates(){
+  const a=nearestK(mkt.spot),has=k=>ch.rows.some(r=>r.k===k&&r.ce&&r.pe&&r.ce.ltp>0&&r.pe.ltp>0),C=[];
+  const add=(fam,ls)=>{if(ls.every(l=>has(l.k)))C.push({fam,legs:ls})};
+  for(let k=a-400;k<=a+400;k+=50)for(let w=100;w<=500;w+=100){
+    add('Bull Call Spread',[L('B','CE',k),L('S','CE',k+w)]);add('Bear Put Spread',[L('B','PE',k),L('S','PE',k-w)]);
+    add('Bull Put Spread',[L('S','PE',k),L('B','PE',k-w)]);add('Bear Call Spread',[L('S','CE',k),L('B','CE',k+w)])}
+  for(let d=-200;d<=500;d+=50){add('Long Call',[L('B','CE',a+d)]);add('Long Put',[L('B','PE',a-d)])}
+  for(let c=100;c<=600;c+=100)for(let p=100;p<=600;p+=100)for(const w of[100,200,300])
+    add('Iron Condor',[L('S','CE',a+c),L('B','CE',a+c+w),L('S','PE',a-p),L('B','PE',a-p-w)]);
+  for(const c of[a-50,a,a+50])for(const w of[150,200,300,400])add('Iron Fly',[L('S','CE',c),L('S','PE',c),L('B','CE',c+w),L('B','PE',c-w)]);
+  for(let c=a-300;c<=a+300;c+=100)for(const w of[100,200,300]){
+    add('Call Butterfly',[L('B','CE',c-w),L('S','CE',c,2),L('B','CE',c+w)]);add('Put Butterfly',[L('B','PE',c+w),L('S','PE',c,2),L('B','PE',c-w)])}
+  for(const c of[a-50,a,a+50])add('Long Straddle',[L('B','CE',c),L('B','PE',c)]);
+  for(let c=100;c<=500;c+=100)for(let p=100;p<=500;p+=100)add('Long Strangle',[L('B','CE',a+c),L('B','PE',a-p)]);
+  for(let k=a-200;k<=a+200;k+=50)for(let w=100;w<=400;w+=100){
+    add('Call Ratio Backspread',[L('S','CE',k),L('B','CE',k+w,2)]);add('Put Ratio Backspread',[L('S','PE',k),L('B','PE',k-w,2)])}
+  return C}
+function tgEval(ls){
+  const S=mkt.spot,T=Math.max(dteDays(),0.02)/365,r=cfg.rate/100,v=((feats&&feats.atmIV)||mkt.vix||13)/100,sd=v*Math.sqrt(T);
+  let up=0;for(const l of ls)if(l.type!=='PE')up+=sgn(l)*l.lots;
+  let mn=Infinity,mx=-Infinity;for(const x of[0,...ls.map(l=>l.k),S*3]){const p=expiryPL(x,ls);mn=Math.min(mn,p);mx=Math.max(mx,p)}
+  if(up<0)mn=-Infinity;if(up>0)mx=Infinity;
+  let W=0,pop=0;for(let i=0;i<=160;i++){const z=-4+8*i/160,w=npdf(z);W+=w;if(expiryPL(S*Math.exp((r-v*v/2)*T+sd*z),ls)>0)pop+=w}
+  return{mn,mx,pop:pop/W}}
+function tgDirFit(cat,view,f){
+  if(view==='any')return .5;
+  if(view!=='auto')return cat===view?1:(view==='neutral'&&cat==='move')||(view==='move'&&cat==='neutral')?0:.2;
+  const bull=clamp(f.dir*2.2,0,1),bear=clamp(-f.dir*2.2,0,1),n=clamp(1-Math.abs(f.dir)*1.8,0,1);
+  return{bull,bear,neutral:n*(f.eventRisk?.6:1),move:(f.eventRisk?.7:0)+(f.vol==='Low'?.3:0)}[cat]}
+function tgRun(){
+  const maxL=Math.abs(+$('tgLoss').value||0),tgtP=Math.abs(+$('tgProfit').value||0),unl=$('tgUnl').checked,view=$('tgView').value,f=feats;
+  if(!maxL)return{err:'Enter the most you are willing to lose.'};
+  if(!ch||!ch.rows.length)return{err:'Option chain not loaded yet.'};
+  const all=[];
+  for(const c of tgCandidates()){const e1=tgEval(c.legs);if(!isFinite(e1.mn)||e1.mn>=0)continue;
+    const loss1=-e1.mn,n=Math.floor(maxL/loss1),lots=clamp(n,1,20),fits=n>=1;
+    const mx=isFinite(e1.mx)?e1.mx*lots:Infinity,loss=loss1*lots;
+    if(unl&&isFinite(mx))continue;
+    const pf=unl?1:tgtP?Math.min(mx/tgtP,1):1,meets=unl||!tgtP||mx>=tgtP;
+    const dir=tgDirFit(TG_CAT[c.fam],view,f);
+    const score=(fits?0:-1)+(meets?0:-0.3)+0.4*e1.pop+0.35*pf+0.25*dir;
+    all.push({...c,lots,fits,meets,loss,mx,pop:e1.pop,dir,score})}
+  all.sort((a,b)=>b.score-a.score);
+  const out=[],famSeen={};
+  for(const c of all){if((famSeen[c.fam]||0)>=1)continue;famSeen[c.fam]=1;out.push(c);if(out.length>=3)break}
+  return{out,n:all.length,maxL,tgtP,unl}}
+$('tgFind').onclick=()=>{
+  const r=tgRun(),box=$('tgRes');
+  if(r.err){box.innerHTML=`<div class="banner">${esc(r.err)}</div>`;return}
+  if(!r.out.length){box.innerHTML='<div class="banner">No defined-risk strategy fits these numbers. Raise the max loss or switch off "Unlimited profit".</div>';return}
+  const anyMeets=r.out.some(c=>c.fits&&c.meets);
+  tgList=r.out.map(c=>({...c,legs:c.legs.map(l=>({...l,lots:l.lots*c.lots}))}));
+  box.innerHTML=(anyMeets?'':`<div class="banner">Nothing reaches ${r.unl?'unlimited profit':inr(r.tgtP)+' profit'} with at most ${inr(r.maxL)} loss right now. These are the closest. A bigger profit needs a bigger loss limit or a lower chance of profit.</div>`)+
+   `<p class="note">${r.n} sized strategies checked on the ${esc($('expiry').value)} chain.</p>`+
+   tgList.map((c,i)=>{const a=analyse(c.legs),rr=isFinite(a.mx)&&a.mn<0?(a.mx/-a.mn).toFixed(2):'∞';
+    const why=[];
+    why.push(c.fits?`Max loss ${inr(a.mn)} is within your ${inr(r.maxL)} limit (${c.lots} lot${c.lots>1?'s':''})`:`Even 1 lot loses up to ${inr(a.mn)}, more than your limit`);
+    if(!r.unl&&r.tgtP)why.push(isFinite(a.mx)?(a.mx>=r.tgtP?`Max profit ${inr(a.mx)} meets your ${inr(r.tgtP)} target`:`Max profit ${inr(a.mx)} is short of your ${inr(r.tgtP)} target`):'Profit is open-ended above the breakeven');
+    const cat=TG_CAT[c.fam],vw=$('tgView').value;
+    why.push(vw==='auto'?`Market read is ${feats.dirLbl.toLowerCase()}, ${feats.vol.toLowerCase()} volatility${feats.eventRisk?', event before expiry':''}: ${c.dir>=.6?'good fit':c.dir>=.3?'partial fit':'weak fit'} for a ${({bull:'bullish',bear:'bearish',neutral:'range-bound',move:'big-move'})[cat]} trade`:`Matches your ${({bull:'bullish',bear:'bearish',neutral:'range-bound',move:'big-move',any:'any'})[vw]} view`);
+    return `<div class="sug${i===0?' top':''}">
+    <div class="sug-h"><strong>${i+1}. ${c.fam}</strong><span class="flag">${c.lots} lot${c.lots>1?'s':''} · R:R ${rr}</span></div>
+    <ol class="orders">${c.legs.map(l=>`<li>${l.side==='B'?'Buy':'Sell'} ${l.lots}× ${l.k} ${l.type} @ ${num(l.px)}</li>`).join('')}</ol>
+    <div class="m"><span>Max P <b class="pos">${inr(a.mx)}</b></span><span>Max L <b class="neg">${inr(a.mn)}</b></span><span>POP <b>${a.pop==null?'—':(a.pop*100).toFixed(0)+'%'}</b></span><span>BE <b>${a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span><span>${a.net>=0?'Credit':'Debit'} <b>${inr(Math.abs(a.net))}</b></span></div>
+    <ul>${why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>
+    <div class="toolbar"><button class="sm pri" data-tgtake="${i}">Take trade</button><button class="sm" data-tgload="${i}">Load into builder</button></div></div>`}).join('');
+};
+let tgList=[];
+$('tgRes').addEventListener('click',e=>{const t=e.target;
+  if(t.dataset.tgtake!=null){const c=tgList[+t.dataset.tgtake];takeTrade(t,c.fam,c.legs);return}
+  if(t.dataset.tgload!=null){legs=tgList[+t.dataset.tgload].legs.map(l=>({...l}));renderLegs();renderPos();$('legs').scrollIntoView({behavior:'smooth',block:'start'})}});
+$('tgUnl').addEventListener('change',()=>{$('tgProfit').disabled=$('tgUnl').checked});
+['tgLoss','tgProfit','tgView'].forEach(id=>$(id).addEventListener('change',()=>{try{localStorage.setItem('nosb2.tg',JSON.stringify({l:$('tgLoss').value,p:$('tgProfit').value,v:$('tgView').value}))}catch(e){}}));
+try{const t=JSON.parse(localStorage.getItem('nosb2.tg')||'null');if(t){$('tgLoss').value=t.l;$('tgProfit').value=t.p;$('tgView').value=t.v}}catch(e){}
 
 // ---------------- P&L ----------------
 const sgn=l=>l.side==='B'?1:-1;
