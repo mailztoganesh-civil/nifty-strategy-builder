@@ -74,7 +74,8 @@ button.sm{font-size:.8rem;padding:4px 9px}
 .leg.off{opacity:.45}
 .leg .x{padding:0;color:var(--loss);border:none;background:none;font-size:1.15rem}
 select.buy{color:var(--profit)} select.sell{color:var(--loss)}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:1px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:0;background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.stats .stat{box-shadow:1px 0 0 var(--line),0 1px 0 var(--line)}
 .stat{background:var(--panel);padding:8px 10px;display:grid;gap:1px}
 .stat span{font-size:.68rem;text-transform:uppercase;letter-spacing:.07em;color:var(--muted);font-weight:600}
 .stat b{font-family:var(--num);font-size:.95rem;font-variant-numeric:tabular-nums;font-weight:600}
@@ -95,7 +96,15 @@ th{font-family:var(--ui);font-weight:600;color:var(--muted);font-size:.68rem;tex
 #chain tr.atm td.k{color:var(--accent)}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
 .seg button{border:none;border-radius:0;padding:4px 10px;font-size:.8rem}
-.seg button.on.b{background:var(--profit);color:#fff}.seg button.on.s{background:var(--loss);color:#fff}
+.seg button.on.b{background:var(--accent);color:#fff}
+#tapB.on{background:var(--profit)}
+.jrow{border:1px solid var(--line);border-radius:8px}
+.jrow summary{display:grid;grid-template-columns:56px 1fr auto;gap:8px;padding:8px 10px;align-items:center;cursor:pointer;list-style:none}
+.jrow summary::-webkit-details-marker{display:none}
+.jd{font-family:var(--num);font-size:.78rem;color:var(--muted)}.jn{min-width:0;overflow-wrap:anywhere}.jp{font-family:var(--num);font-weight:600}
+.jbody{padding:0 10px 10px;display:grid;gap:6px}
+.restore{border:1px solid var(--line);border-radius:6px;padding:4px 9px;font-weight:600;font-size:.8rem;cursor:pointer}
+textarea{font:inherit;color:var(--fg);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:7px 8px;width:100%;min-height:52px}.seg button.on.s{background:var(--loss);color:#fff}
 .list{display:grid;gap:8px;margin:0;padding:0;list-style:none;font-size:.86rem}
 .list li{display:grid;grid-template-columns:auto 1fr;gap:8px;align-items:start}
 .list a{color:var(--fg);text-decoration:none}
@@ -125,7 +134,7 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
 <div class="wrap">
 <header>
   <h1>NIFTY <span>Strategy Builder</span></h1>
-  <div class="status"><span id="pill" class="pill model">CONNECTING</span><span id="stamp"></span><button class="sm" id="refresh">Refresh</button></div>
+  <div class="status"><span class="seg" title="New trades are paper (simulated) or real (you place the orders)"><button class="b" id="modeP">Paper</button><button class="b" id="modeR">Real</button></span><span id="acct" class="note"></span><span id="pill" class="pill model">CONNECTING</span><span id="stamp"></span><button class="sm" id="refresh">Refresh</button></div>
 </header>
 <div class="banner" id="banner" hidden></div>
 <div class="strip" id="strip"></div>
@@ -159,9 +168,12 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
     <div class="toolbar" style="justify-content:space-between"><h2>Headlines</h2><span class="note" id="newsTone"></span></div>
     <ul class="list" id="news"></ul>
   </section>
-  <section class="panel" id="histBox" hidden>
-    <h2>Closed trades</h2>
-    <div class="tw"><table id="hist"></table></div>
+  <section class="panel" id="histBox">
+    <div class="toolbar" style="justify-content:space-between"><h2>Trade journal</h2><span class="seg" id="jFilt"><button class="b on" data-jf="all">All</button><button class="b" data-jf="paper">Paper</button><button class="b" data-jf="real">Real</button></span></div>
+    <div class="stats" id="jStats"></div>
+    <div id="jList" style="display:grid;gap:6px"></div>
+    <div class="toolbar"><button class="sm" id="jCsv">Export CSV</button><button class="sm" id="jJson">Backup</button><label class="sm restore" for="jImp">Restore<input type="file" id="jImp" accept=".json,application/json" hidden></label></div>
+    <p class="note">Every trade is saved on this device as it happens. Use Backup now and then to keep a copy in Files or iCloud.</p>
   </section>
 </div>
 
@@ -226,6 +238,7 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
         <label class="f">Lot size<input id="lot" type="number" step="1"></label>
         <label class="f">Rate %<input id="rate" type="number" step="0.1"></label>
         <label class="f">Charges ₹/order<input id="charges" type="number" step="5"></label>
+        <label class="f">Paper capital ₹<input id="paperCap" type="number" step="50000"></label>
       </div>
       <p class="note" style="margin-top:8px">Prices refresh every 15 s during market hours (Mon–Fri 09:15–15:30 IST); headlines, VIX and events every 5 min.</p>
     </details>
@@ -240,7 +253,7 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
 'use strict';
 const $=id=>document.getElementById(id);
 const STEP=50, IST='Asia/Kolkata';
-const DEF={worker:'https://nifty-options-proxy.mailztoganesh.workers.dev',lot:65,rate:6.5,budget:20000,charges:40};
+const DEF={worker:'https://nifty-options-proxy.mailztoganesh.workers.dev',lot:65,rate:6.5,budget:20000,charges:40,paperCap:500000};
 let cfg={...DEF}, legs=[], tapSide='B';
 let mkt=null, ch=null, newsItems=[], events=[], feats=null, sugList=[];
 let mode='CONNECTING';
@@ -538,7 +551,7 @@ function renderLU(f){
     <div class="sug-h"><strong>${i+1}. ${c.fam}</strong><span class="flag">${arrow(c.sides)}</span></div>
     <div class="bar" title="Fit ${Math.round(c.score*100)}%"><i style="width:${Math.round(c.score*100)}%"></i></div>
     <div class="legtxt">${c.legs.map(l=>`${l.side==='B'?'Buy':'Sell'} ${l.lots}× ${l.k} ${l.type} @ ${num(l.px)}`).join(' · ')}</div>
-    <div class="m"><span>Max loss <b class="neg">${inr(-c.maxLoss)}</b> <span class="mut">at ${c.lossAt}</span></span><span>${c.net>=0?'Credit':'Debit'} <b class="${c.net>=0?'pos':'neg'}">${inr(Math.abs(c.net))}</b></span>
+    <div class="m">${capTxt(c.legs)}<span>Max loss <b class="neg">${inr(-c.maxLoss)}</b> <span class="mut">at ${c.lossAt}</span></span><span>${c.net>=0?'Credit':'Debit'} <b class="${c.net>=0?'pos':'neg'}">${inr(Math.abs(c.net))}</b></span>
       <span>BE <b>${c.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span><span>${c.sides==='both'?'Move to nearest BE':'Move for open-ended profit'} <b>${pct(c.move,1)}</b></span>
       <span>POP <b>${(c.pop*100).toFixed(0)}%</b></span><span>P(≥2× risk) <b>${(c.pBig*100).toFixed(0)}%</b></span><span>Theta/day <b class="${cls(c.theta)}">${inr(c.theta)}</b></span></div>
     <ul>${luWhy(c,f).map(r=>`<li>${esc(r)}</li>`).join('')}</ul>
@@ -551,8 +564,9 @@ $('lu').addEventListener('click',e=>{if(e.target.dataset.lutake!=null){const c=l
 $('luAll').addEventListener('click',e=>{const i=e.target.dataset.lub;if(i!=null)luLoad(luBest[+i])});
 
 // ---------------- active trade: tracking, alerts, adjustments ----------------
-let trade=store.get('trade',null),hist=store.get('hist',[]),adjList=[],adjRec=null;
-const saveTrade=()=>{store.set('trade',trade);store.set('hist',hist)};
+let trades=store.get('trades',null);if(!trades){const t0=store.get('trade',null);trades=t0?[t0]:[]}
+let trade=trades.find(t=>t.id===store.get('selTrade',0))||trades[0]||null,hist=store.get('hist',[]),adjList=[],adjRec=null;
+const saveTrade=()=>{store.set('trades',trades);store.set('selTrade',trade?trade.id:0);store.set('hist',hist)};
 const openLegs=()=>trade.legs.map((l,i)=>({...l,i})).filter(l=>l.open);
 const legPL=(l,px)=>sgn(l)*(px-l.px)*l.lots*lot();
 function booked(){let s=0;for(const l of trade.legs)if(!l.open)s+=legPL(l,l.exit);return s-(trade.costs||0)}
@@ -562,19 +576,24 @@ const legTxt=l=>`${l.lots}× ${l.type==='FUT'?'FUT':l.k+' '+l.type}`;
 
 function startTrade(name,ls){
   ls=ls.filter(l=>l.on!==false);if(!ls.length)return;
+  if(tradeMode==='paper'){ls=ls.map(l=>({...l,px:fillPx(l.type,l.k,l.side)??l.px}));
+    const need=capital(ls).total,a=paperAcct();if(need>a.free){notify(`Not enough paper funds: this trade needs about ${inr(need)}, ${inr(a.free)} is free. Raise Paper capital in Settings or close a trade.`);return}}
   let net=0;for(const l of ls)if(l.type!=='FUT')net-=sgn(l)*l.px*l.lots*lot();
   const a=analyse(ls),credit=net>0,size=Math.abs(net)||5000;
   let target=credit?size*0.5:size;if(isFinite(a.mx)&&a.mx>0)target=Math.min(target,a.mx*0.7);
-  trade={id:Date.now(),name,expiry:$('expiry').value,opened:Date.now(),
+  trade={id:Date.now(),mode:tradeMode,notes:'',name,expiry:$('expiry').value,opened:Date.now(),
     entry:{spot:mkt.spot,vix:mkt.vix,dir:feats.dir,dirLbl:feats.dirLbl,vol:feats.vol},
     legs:ls.map(l=>({side:l.side,type:l.type,k:l.k,lots:l.lots,px:l.px,open:true,t:Date.now()})),
     netEntry:net,stop:Math.round(credit?size*1.5:size*0.5),target:Math.round(target),costs:ls.length*cfg.charges,alerted:{},
-    log:[{t:Date.now(),txt:`Opened ${name}: ${ls.map(l=>(l.side==='B'?'Buy ':'Sell ')+legTxt(l)+' @ '+num(l.px)).join(', ')} · ${credit?'credit':'debit'} ${inr(Math.abs(net))}`}]};
-  saveTrade();renderAll();$('tradeBox').scrollIntoView({behavior:'smooth',block:'start'});
+    log:[{t:Date.now(),txt:`Opened ${name}: ${ls.map(l=>(l.side==='B'?'Buy ':'Sell ')+legTxt(l)+' @ '+num(l.px)).join(', ')} · ${credit?'credit':'debit'} ${inr(Math.abs(net))}${tradeMode==='paper'?' (paper fill at bid/ask)':''}`}]};
+  trades.push(trade);saveTrade();renderAll();$('tradeBox').scrollIntoView({behavior:'smooth',block:'start'});
 }
 function closeTrade(note){
-  hist.unshift({name:trade.name,opened:trade.opened,closed:Date.now(),pnl:booked(),adj:trade.log.length-1,note});hist=hist.slice(0,30);
-  trade=null;saveTrade();$('expiry').disabled=false;renderAll();
+  const pnl=booked();trade.log.push({t:Date.now(),txt:`Closed (${note}) · final P&L ${inr(pnl)}`});
+  hist.unshift({id:trade.id,mode:trade.mode||'real',name:trade.name,opened:trade.opened,closed:Date.now(),expiry:trade.expiry,entry:trade.entry,
+    legs:trade.legs.map(l=>({...l})),log:trade.log,costs:trade.costs||0,notes:trade.notes||'',stop:trade.stop,target:trade.target,pnl,adj:trade.log.filter(x=>x.adj).length,note});
+  hist=hist.slice(0,2000);trades=trades.filter(t=>t!==trade);trade=trades[0]||null;
+  saveTrade();$('expiry').disabled=false;if(trade){$('expiry').value=trade.expiry;refreshChain()}else renderAll();
 }
 
 // position evaluation: P&L at expiry over a lognormal spread of outcomes, tilted by the market read
@@ -676,7 +695,7 @@ function notify(txt){
 }
 
 function renderTrade(f){
-  const box=$('tradeBox');
+  const box=$('tradeBox');if(document.activeElement&&document.activeElement.id==='tNotes'&&trade)return;
   if(!trade){box.hidden=true;$('expiry').disabled=false;return}
   box.hidden=false;
   if($('expiry').value!==trade.expiry){if(![...$('expiry').options].some(o=>o.value===trade.expiry))$('expiry').insertAdjacentHTML('afterbegin',`<option>${trade.expiry}</option>`);$('expiry').value=trade.expiry}
@@ -688,7 +707,12 @@ function renderTrade(f){
   const T=tradeTriggers(f,st,tot);
   // alerts once per trigger key
   const fresh=T.filter(t=>!trade.alerted[t.key]);fresh.forEach(t=>trade.alerted[t.key]=Date.now());
-  if(fresh.length){saveTrade();notify(fresh.map(t=>t.txt).join(' · '))}
+  if(fresh.length){saveTrade();notify((trades.length>1?trade.name+': ':'')+fresh.map(t=>t.txt).join(' · '))}
+  // other open trades on the same expiry also get alerts
+  const cur=trade;for(const ot of trades){if(ot===cur||ot.expiry!==cur.expiry)continue;trade=ot;
+    try{const ob=booked(),om=openMTM(),ost=evalPos(openLegs(),ob,f),oT=tradeTriggers(f,ost,ob+om),ofr=oT.filter(x=>!ot.alerted[x.key]);
+      ofr.forEach(x=>ot.alerted[x.key]=Date.now());if(ofr.length){saveTrade();notify(ot.name+': '+ofr.map(x=>x.txt).join(' · '))}}catch(err){}}
+  trade=cur;
   // adjustments
   adjList=genAdj(f);const hold=adjList[0],exit=adjList[1];
   let rec;const hit=k=>T.some(t=>t.key===k);
@@ -719,10 +743,11 @@ function renderTrade(f){
     <p class="note" style="color:var(--fg)">${esc(c.why)}</p>
     ${c.orders.length?`<ol class="orders">${c.orders.map(o=>`<li>${esc(o)}</li>`).join('')}</ol>`:''}
     ${c.closes===hold.closes?'':cmp(c)}
-    ${c.closes===hold.closes?'':`<div class="toolbar"><button class="sm pri" data-apply="${i}">I placed these orders</button><span class="note">Updates the trade at these LTPs. Edit entry prices below if your fills differ.</span></div>`}</div>`;
+    ${c.closes===hold.closes?'':`<div class="toolbar"><button class="sm pri" data-apply="${i}">${trade.mode==='paper'?'Execute (paper)':'I placed these orders'}</button><span class="note">Updates the trade at these LTPs. Edit entry prices below if your fills differ.</span></div>`}</div>`;
   const recIdx=rec.closes===exit.closes?1:rec.closes===hold.closes?0:adjList.indexOf(rec);
   box.innerHTML=`
-   <div class="toolbar" style="justify-content:space-between"><h2>Active trade · ${esc(trade.name)}</h2><span class="pill st-${status[0]}">${status[1]}</span></div>
+   <div class="toolbar" style="justify-content:space-between"><h2>Open trade · ${esc(trade.name)} <span class="pill ${trade.mode==='paper'?'model':'live'}" style="font-size:.62rem">${(trade.mode||'real').toUpperCase()}</span></h2><span class="pill st-${status[0]}">${status[1]}</span></div>
+   ${trades.length>1?`<div class="toolbar">${trades.map(t=>`<button class="sm${t===trade?' pri':''}" data-tsel="${t.id}">${esc(t.name)} · ${(t.mode||'real')[0].toUpperCase()}</button>`).join('')}</div>`:''}
    <div class="stats">${tile('Total P&L',inr(tot),cls(tot))}${tile('Booked + charges',inr(bk),cls(bk))}${tile('Open MTM',inr(mtm),cls(mtm))}${tile('Net delta',st.G.d.toFixed(0))}${tile('Theta/day',inr(st.G.t),cls(st.G.t))}${tile('Max loss now',inr(st.maxLoss),'neg')}</div>
    <p class="note">Since entry (${istStr(new Date(trade.opened),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} IST): Nifty ${num(trade.entry.spot,0)} → ${num(mkt.spot,0)} (${pct((mkt.spot/trade.entry.spot-1)*100)}) · VIX ${num(trade.entry.vix)} → ${num(mkt.vix)} · read ${trade.entry.dirLbl} → ${f.dirLbl} · expiry ${trade.expiry} (${dteDays().toFixed(2)} d)</p>
    ${T.length?`<ul class="alerts">${T.map(t=>`<li class="${t.lvl}">${esc(t.txt)}</li>`).join('')}</ul>`:`<div class="okline">No adjustment needed. ${wl.up||wl.dn?`Adjust if Nifty reaches <b>${wl.up?'≥ '+wl.up.toFixed(0):''}${wl.up&&wl.dn?'</b> or <b>':''}${wl.dn?'≤ '+wl.dn.toFixed(0):''}</b>.`:''}</div>`}
@@ -739,16 +764,20 @@ function renderTrade(f){
      ${'Notification' in window&&Notification.permission!=='granted'?'<button class="sm" id="tNotif">Turn on alerts</button>':''}
      <button class="sm" id="tExit">Close trade at LTP</button>
    </div>
+   <label class="f">Notes (saved to the journal)<textarea id="tNotes" placeholder="Why you took it, plan, lessons…">${esc(trade.notes||'')}</textarea></label>
    <details><summary>Trade log (${trade.log.length})</summary><ul class="list" style="margin-top:8px">${trade.log.slice().reverse().map(x=>`<li><span class="t">${istStr(new Date(x.t),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span><span>${esc(x.txt)}</span></li>`).join('')}</ul></details>
    <p class="note">Adjustments are simulated on the live chain: each one is scored on how much it improves the result if Nifty moves 1.5 standard deviations against you, plus the expected P&L, after charges of ${inr(cfg.charges)} per order. Alerts only fire while this app is open.</p>`;
 }
 function applyAdj(c){
   const now=Date.now();
-  for(const cl of c.closes){const l=trade.legs[cl.i],q=quote(l.type,l.k)??l.px;
+  const paper=trade.mode==='paper';
+  const done=[];
+  for(const cl of c.closes){const l=trade.legs[cl.i],q=(paper?fillPx(l.type,l.k,l.side==='B'?'S':'B'):quote(l.type,l.k))??l.px;
+    done.push(`${l.side==='S'?'Buy':'Sell'} to close ${cl.lots}× ${l.type==='FUT'?'FUT':l.k+' '+l.type} @ ${num(q)}`);
     if(cl.lots>=l.lots){l.open=false;l.exit=q;l.closed=now}else{trade.legs.push({...l,lots:cl.lots,open:false,exit:q,closed:now});l.lots-=cl.lots}}
-  for(const o of c.opens)trade.legs.push({side:o.side,type:o.type,k:o.k,lots:o.lots,px:o.px,open:true,t:now});
+  for(const o of c.opens){const px=(paper?fillPx(o.type,o.k,o.side):null)??o.px;trade.legs.push({side:o.side,type:o.type,k:o.k,lots:o.lots,px,open:true,t:now});done.push(`${o.side==='B'?'Buy':'Sell'} ${legTxt(o)} @ ${num(px)}`)}
   trade.costs=(trade.costs||0)+c.cost;trade.alerted={};trade.lastAdj={t:now,spot:mkt.spot};
-  trade.log.push({t:now,txt:`${c.title}: ${c.orders.join('; ')}`});
+  trade.log.push({t:now,adj:c.closes.length+c.opens.length>0&&c.title!=='Exit all',txt:`${c.title}: ${done.join('; ')}${paper?' (paper fills at bid/ask)':''}`});
   if(!trade.legs.some(l=>l.open)){closeTrade(c.title);return}
   saveTrade();renderAll();
 }
@@ -756,23 +785,74 @@ $('tradeBox').addEventListener('click',e=>{const t=e.target;
   if(t.dataset.apply!=null){applyAdj(adjList[+t.dataset.apply]);return}
   if(t.dataset.cl!=null){const l=trade.legs[+t.dataset.cl];applyAdj(mkAdj(`Close ${l.k} ${l.type}`,[{i:+t.dataset.cl,lots:l.lots}],[],''));return}
   if(t.id==='tView'){legs=openLegs().map(l=>({on:true,side:l.side,type:l.type,k:l.k,lots:l.lots,px:l.px}));renderLegs();renderPos();$('legs').scrollIntoView({behavior:'smooth'});return}
+  if(t.dataset.tsel){const nt=trades.find(x=>String(x.id)===t.dataset.tsel);if(nt&&nt!==trade){trade=nt;saveTrade();$('expiry').value=trade.expiry;refreshChain()}return}
   if(t.id==='tNotif'){try{Notification.requestPermission().then(()=>renderAll())}catch(err){}return}
   if(t.id==='tExit'){if(t.dataset.armed){applyAdj(adjList[1])}else{t.dataset.armed='1';t.textContent='Tap again to confirm';setTimeout(()=>{if(t.isConnected){delete t.dataset.armed;t.textContent='Close trade at LTP'}},4000)}}
 });
+$('tradeBox').addEventListener('input',e=>{if(e.target.id==='tNotes'&&trade){trade.notes=e.target.value;saveTrade()}});
 $('tradeBox').addEventListener('change',e=>{const t=e.target;
   if(t.dataset.te!=null){trade.legs[+t.dataset.te].px=+t.value||trade.legs[+t.dataset.te].px;trade.log.push({t:Date.now(),txt:`Entry price edited: ${legTxt(trade.legs[+t.dataset.te])} @ ${t.value}`})}
   else if(t.id==='tStop')trade.stop=Math.abs(+t.value)||trade.stop;
   else if(t.id==='tTarget')trade.target=Math.abs(+t.value)||trade.target;
+  else if(t.id==='tNotes'){trade.notes=t.value;saveTrade();return}
   else return;saveTrade();renderAll()});
 function takeTrade(btn,name,ls){
-  if(trade&&!btn.dataset.armed){btn.dataset.armed='1';btn.textContent='Replace active trade?';setTimeout(()=>{if(btn.isConnected){delete btn.dataset.armed;btn.textContent='Take trade'}},4000);return}
-  if(trade)closeTrade('Replaced');startTrade(name,ls.map(l=>({...l})))}
+  if(trade&&trade.expiry!==$('expiry').value){notify('Open trades use '+trade.expiry+'. Switch to that trade tab, or close it, to trade another expiry.');return}
+  startTrade(name,ls.map(l=>({...l})))}
+// ---------------- paper trading, fills, journal ----------------
+let tradeMode=store.get('mode','paper');
+// paper fills: buy at the ask, sell at the bid (NSE best quotes); if no quote, LTP ± 0.3%
+function fillPx(type,k,side){
+  if(type==='FUT')return mkt.spot;const r=rowAt(k),o=r&&r[type.toLowerCase()];if(!o)return null;
+  let p=side==='B'?(o.ask>0?o.ask:o.ltp*1.003+0.05):(o.bid>0?o.bid:o.ltp*0.997-0.05);
+  return Math.max(0.05,Math.round(p*20)/20)}
+const paperRealized=()=>hist.filter(h=>h.mode==='paper').reduce((a,h)=>a+h.pnl,0);
+function paperInUse(){let s=0;for(const t of trades)if(t.mode==='paper'){const ls=t.legs.filter(l=>l.open);if(ls.length)s+=capital(ls).margin}return s}
+function paperAcct(){const cap=+cfg.paperCap||500000,bal=cap+paperRealized(),use=paperInUse();return{cap,bal,use,free:bal-use}}
+function renderMode(){$('modeP').classList.toggle('on',tradeMode==='paper');$('modeR').classList.toggle('on',tradeMode==='real');
+  const a=paperAcct();$('acct').textContent=tradeMode==='paper'?`Paper ₹${Math.round(a.free).toLocaleString('en-IN')} free`:'Real trades: log only, you place orders'}
+$('modeP').onclick=()=>{tradeMode='paper';store.set('mode',tradeMode);renderMode()};
+$('modeR').onclick=()=>{tradeMode='real';store.set('mode',tradeMode);renderMode()};
+
+let jFilter='all';
+const dur=ms=>{const h=ms/36e5;return h<24?h.toFixed(1)+' h':(h/24).toFixed(1)+' d'};
 function renderHist(){
-  $('histBox').hidden=!hist.length;
-  const tot=hist.reduce((a,h)=>a+h.pnl,0),wins=hist.filter(h=>h.pnl>0).length;
-  $('hist').innerHTML=hist.length?`<tr><th>Trade</th><th>Closed</th><th>Adj.</th><th>P&L</th></tr>`+hist.map(h=>`<tr><td>${esc(h.name)}</td><td>${istStr(new Date(h.closed),{day:'numeric',month:'short'})}</td><td>${h.adj}</td><td class="${cls(h.pnl)}">${inr(h.pnl)}</td></tr>`).join('')+
-    `<tr style="font-weight:600"><td>${hist.length} trades · ${wins} wins</td><td></td><td></td><td class="${cls(tot)}">${inr(tot)}</td></tr>`:'';
+  const list=hist.filter(h=>jFilter==='all'||(h.mode||'real')===jFilter);
+  const pn=list.map(h=>h.pnl),wins=pn.filter(x=>x>0),loss=pn.filter(x=>x<=0),tot=pn.reduce((a,b)=>a+b,0);
+  const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null,t=(k,v,c='')=>`<div class="stat"><span>${k}</span><b class="${c}">${v}</b></div>`;
+  let peak=0,run=0,dd=0;for(const x of pn.slice().reverse()){run+=x;peak=Math.max(peak,run);dd=Math.min(dd,run-peak)}
+  const a=paperAcct();
+  $('jStats').innerHTML=t('Trades',list.length)+t('Win rate',list.length?Math.round(wins.length/list.length*100)+'%':'—')+t('Net P&L',inr(tot),cls(tot))+
+    t('Avg win',avg(wins)==null?'—':inr(avg(wins)),'pos')+t('Avg loss',avg(loss)==null?'—':inr(avg(loss)),'neg')+t('Max drawdown',inr(dd),dd<0?'neg':'')+
+    (jFilter!=='real'?t('Paper balance',inr(a.bal),cls(a.bal-a.cap))+t('Paper free',inr(a.free)):'');
+  $('jList').innerHTML=list.length?list.map(h=>{
+    const legsTxt=(h.legs||[]).map(l=>`<li>${l.side==='B'?'Buy':'Sell'} ${l.lots}× ${l.type==='FUT'?'FUT':l.k+' '+l.type} @ ${num(l.px)} → ${l.exit!=null?num(l.exit):'—'} <span class="${cls(sgn(l)*((l.exit??l.px)-l.px))}">${inr(sgn(l)*((l.exit??l.px)-l.px)*l.lots*lot())}</span></li>`).join('');
+    const e=h.entry||{};
+    return`<details class="jrow"><summary><span class="jd">${istStr(new Date(h.opened||h.closed),{day:'numeric',month:'short'})}</span><span class="jn">${esc(h.name)} <span class="pill ${h.mode==='paper'?'model':'live'}" style="font-size:.6rem">${(h.mode||'real').toUpperCase()}</span></span><span class="jp ${cls(h.pnl)}">${inr(h.pnl)}</span></summary>
+      <div class="jbody">
+        <p class="note">Opened ${istStr(new Date(h.opened||h.closed),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} · closed ${istStr(new Date(h.closed),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})} IST (${dur(h.closed-(h.opened||h.closed))}) · expiry ${esc(h.expiry||'—')} · ${h.adj||0} adjustment${h.adj===1?'':'s'} · charges ${inr(h.costs||0)}</p>
+        ${e.spot?`<p class="note">At entry: Nifty ${num(e.spot,0)} · VIX ${num(e.vix)} · read ${esc(e.dirLbl||'—')}, ${esc(e.vol||'—')} vol</p>`:''}
+        ${legsTxt?`<ul class="orders" style="list-style:none;padding:0">${legsTxt}</ul>`:''}
+        ${h.notes?`<p class="note" style="color:var(--fg)">Notes: ${esc(h.notes)}</p>`:''}
+        ${h.log?`<ul class="list">${h.log.map(x=>`<li><span class="t">${istStr(new Date(x.t),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span><span>${esc(x.txt)}</span></li>`).join('')}</ul>`:''}
+      </div></details>`}).join(''):'<p class="note">No closed trades yet. Take a trade (paper or real) and it will be recorded here when it closes, with every leg, adjustment and the final P&L.</p>';
 }
+$('jFilt').addEventListener('click',e=>{const f=e.target.dataset.jf;if(!f)return;jFilter=f;[...$('jFilt').children].forEach(b=>b.classList.toggle('on',b.dataset.jf===f));renderHist()});
+function saveFile(name,text,type){try{const b=new Blob([text],{type}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000)}catch(e){notify('Download is not available here. Open the app from GitHub Pages to export.')}}
+$('jCsv').onclick=()=>{
+  const q=v=>'"'+String(v??'').replace(/"/g,'""')+'"',d=t=>t?new Date(t+5.5*36e5).toISOString().slice(0,16).replace('T',' '):'';
+  const rows=[['Opened (IST)','Closed (IST)','Mode','Strategy','Expiry','Nifty at entry','VIX at entry','Market read','Legs (entry → exit)','Adjustments','Charges','P&L','Notes']];
+  for(const h of hist){const e=h.entry||{};rows.push([d(h.opened),d(h.closed),h.mode||'real',h.name,h.expiry,e.spot,e.vix,e.dirLbl,(h.legs||[]).map(l=>`${l.side==='B'?'Buy':'Sell'} ${l.lots}x ${l.k} ${l.type} ${l.px}->${l.exit??''}`).join(' | '),h.adj||0,Math.round(h.costs||0),Math.round(h.pnl),h.notes])}
+  saveFile('nifty-trade-journal.csv',rows.map(r=>r.map(q).join(',')).join('\n'),'text/csv')};
+$('jJson').onclick=()=>saveFile('nifty-journal-backup-'+new Date().toISOString().slice(0,10)+'.json',JSON.stringify({v:1,saved:Date.now(),trades,hist},null,1),'application/json');
+$('jImp').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)return;
+  try{const j=JSON.parse(await f.text());const ids=new Set(hist.map(h=>h.id+'|'+h.closed));let n=0;
+    for(const h of j.hist||[])if(!ids.has(h.id+'|'+h.closed)){hist.push(h);n++}
+    hist.sort((a,b)=>b.closed-a.closed);
+    for(const t of j.trades||[])if(!trades.some(x=>x.id===t.id)){trades.push(t);n++}
+    if(!trade)trade=trades[0]||null;saveTrade();renderAll();notify(`Restored ${n} trade${n===1?'':'s'} from backup.`)}catch(err){notify('That file is not a journal backup.')}
+  e.target.value=''});
+try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
 
 // ---------------- Draw your payoff: sketch a shape, find matching strikes ----------------
 const DN=60;let dT=new Array(DN+1).fill(null),dRes=[],dSel=0,dView=null,dDrawing=false,dLast=null;
@@ -898,7 +978,7 @@ $('dFind').onclick=()=>{
     <div class="sug-h"><strong>${i+1}. ${esc(nameOf(m.legs))}</strong><span class="flag">${Math.floor(m.fit*100)}% shape match</span></div>
     <div class="bar"><i style="width:${Math.round(m.fit*100)}%"></i></div>
     <ol class="orders">${m.legs.map(l=>`<li>${l.side==='B'?'Buy':'Sell'} ${l.lots}× ${l.k} ${l.type} @ ${num(l.px)}</li>`).join('')}</ol>
-    <div class="m"><span>Max P <b class="pos">${inr(m.a.mx)}</b></span><span>Max L <b class="neg">${inr(m.a.mn)}</b></span><span>${m.a.net>=0?'Credit':'Debit'} <b>${inr(Math.abs(m.a.net))}</b></span><span>BE <b>${m.a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span><span>POP <b>${m.a.pop==null?'—':(m.a.pop*100).toFixed(0)+'%'}</b></span></div>
+    <div class="m">${capTxt(m.legs)}<span>Max P <b class="pos">${inr(m.a.mx)}</b></span><span>Max L <b class="neg">${inr(m.a.mn)}</b></span><span>${m.a.net>=0?'Credit':'Debit'} <b>${inr(Math.abs(m.a.net))}</b></span><span>BE <b>${m.a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span><span>POP <b>${m.a.pop==null?'—':(m.a.pop*100).toFixed(0)+'%'}</b></span></div>
     ${m.big?`<p class="note">Same shape, but even the minimum size (1 lot = ${lot()} units) swings about ${m.big.toFixed(1)}× more rupees than your drawing.</p>`:''}
     ${isFinite(m.a.mn)&&-m.a.mn>(+cfg.budget||20000)?`<p class="note" style="color:var(--loss)">Max loss is above your ₹${(+cfg.budget||20000).toLocaleString('en-IN')} budget.</p>`:''}
     ${!isFinite(m.a.mn)?'<p class="note" style="color:var(--loss)">Unlimited loss on one side, because your drawing keeps falling at the edge.</p>':''}
@@ -1051,7 +1131,7 @@ $('tgFind').onclick=()=>{
     return `<div class="sug${i===0?' top':''}">
     <div class="sug-h"><strong>${i+1}. ${c.fam}</strong>${c.tag?`<span class="flag" style="color:var(--accent)">${c.tag}</span>`:''}<span class="flag">${c.lots} lot${c.lots>1?'s':''} · R:R ${rr}</span></div>
     <ol class="orders">${c.legs.map(l=>`<li>${l.side==='B'?'Buy':'Sell'} ${l.lots}× ${l.k} ${l.type} @ ${num(l.px)}</li>`).join('')}</ol>
-    <div class="m"><span>Max P <b class="pos">${inr(c.mx)}</b></span><span>Max L <b class="neg">${inr(-c.loss)}</b></span><span>Chance of profit <b class="${c.popOK?'':'neg'}">${(c.pop*100).toFixed(0)}%</b></span>${!r.unl&&r.tgtP?`<span>Chance of ≥ ${inr(r.tgtP)} <b>${(c.reach*100).toFixed(0)}%</b></span>`:''}<span>BE <b>${a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span><span>${a.net>=0?'Credit':'Debit'} <b>${inr(Math.abs(a.net))}</b></span></div>
+    <div class="m">${capTxt(c.legs)}<span>Max P <b class="pos">${inr(c.mx)}</b></span><span>Max L <b class="neg">${inr(-c.loss)}</b></span><span>Chance of profit <b class="${c.popOK?'':'neg'}">${(c.pop*100).toFixed(0)}%</b></span>${!r.unl&&r.tgtP?`<span>Chance of ≥ ${inr(r.tgtP)} <b>${(c.reach*100).toFixed(0)}%</b></span>`:''}<span>BE <b>${a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span><span>${a.net>=0?'Credit':'Debit'} <b>${inr(Math.abs(a.net))}</b></span></div>
     <ul>${why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>
     <div class="toolbar"><button class="sm pri" data-tgtake="${i}">Take trade</button><button class="sm" data-tgload="${i}">Load into builder</button></div></div>`}).join('');
 };
@@ -1062,6 +1142,25 @@ $('tgRes').addEventListener('click',e=>{const t=e.target;
 $('tgUnl').addEventListener('change',()=>{$('tgProfit').disabled=$('tgUnl').checked});
 ['tgLoss','tgProfit','tgView','tgPop'].forEach(id=>$(id).addEventListener('change',()=>{try{localStorage.setItem('nosb2.tg',JSON.stringify({l:$('tgLoss').value,p:$('tgProfit').value,v:$('tgView').value,q:$('tgPop').value}))}catch(e){}}));
 try{const t=JSON.parse(localStorage.getItem('nosb2.tg')||'null');if(t){$('tgLoss').value=t.l;$('tgProfit').value=t.p;$('tgView').value=t.v;if(t.q!=null)$('tgPop').value=t.q}}catch(e){}
+
+// ---------------- funds needed: premium + approximate margin + charges ----------------
+// Margin is an estimate: defined-risk positions ≈ max loss + credit received (spread width);
+// unhedged short options ≈ 8.5% of contract value per lot (bigger side only), futures ≈ 11%. Brokers' SPAN figures will differ somewhat.
+function capital(ls){
+  ls=ls.filter(l=>l.on!==false);const lt=lot(),S=mkt.spot;let paid=0,recv=0,futLots=0,calls=0,puts=0;
+  for(const l of ls){if(l.type==='FUT'){futLots+=l.lots;continue}const v=l.px*l.lots*lt;if(l.side==='B')paid+=v;else recv+=v;
+    if(l.type==='CE')calls+=sgn(l)*l.lots;else puts+=sgn(l)*l.lots}
+  let mn=Infinity;for(const x of[0.01,...ls.map(l=>l.k),S*3])mn=Math.min(mn,expiryPL(x,ls));
+  const credit=recv-paid;let margin,naked=false;
+  if(calls>=0&&puts>=0&&!futLots){margin=Math.max(-mn,0)+Math.max(credit,0)}  // every short is covered by a long
+  else{naked=true;const nk=Math.max(Math.max(-calls,0),Math.max(-puts,0)); // a strangle is charged on its bigger side, like SPAN
+    margin=nk*0.085*S*lt+futLots*0.11*S*lt+Math.max(paid-recv,0)}
+  // round-trip charges (open + close): brokerage, STT 0.1% on sell premium, exchange 0.03503%, GST 18%, stamp 0.003% on buys, SEBI fee
+  const orders=ls.length*2,turn=(paid+recv)*2,brk=orders*(+cfg.charges||0),exch=turn*0.0003503;
+  const charges=brk+(paid+recv)*0.001+exch+0.18*(brk+exch)+paid*0.00003+turn*0.000001;
+  return{paid,recv,margin,charges,total:margin+charges,naked}
+}
+const capTxt=ls=>{const c=capital(ls);return`<span title="Premium paid ${inr(c.paid)} · received ${inr(c.recv)} · charges ${inr(c.charges)}">Funds needed ≈ <b>${inr(c.total)}</b>${c.naked?' <span class="mut">(naked short, est.)</span>':''}</span>`};
 
 // ---------------- P&L ----------------
 const sgn=l=>l.side==='B'?1:-1;
@@ -1136,7 +1235,7 @@ function renderSugs(f){
       <div class="sug-h"><strong>${i+1}. ${s.name}</strong><span class="flag">${s.kind==='sell'?'Credit':'Debit'} · ${s.risk} risk</span></div>
       <div class="bar" title="Fit ${Math.round(s.score*100)}%"><i style="width:${Math.round(s.score*100)}%"></i></div>
       <div class="legtxt">${lt}</div>
-      <div class="m"><span>Max P <b class="pos">${inr(a.mx)}</b></span><span>Max L <b class="neg">${inr(a.mn)}</b></span><span>POP <b>${a.pop==null?'—':(a.pop*100).toFixed(0)+'%'}</b></span><span>BE <b>${a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span></div>
+      <div class="m">${capTxt(ls)}<span>Max P <b class="pos">${inr(a.mx)}</b></span><span>Max L <b class="neg">${inr(a.mn)}</b></span><span>POP <b>${a.pop==null?'—':(a.pop*100).toFixed(0)+'%'}</b></span><span>BE <b>${a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span></div>
       <ul>${reasons(s.name,f).map(r=>`<li>${esc(r)}</li>`).join('')}</ul>
       <div class="toolbar"><button class="sm pri" data-take="${i}">Take trade</button><button class="sm" data-load="${i}">Load into builder</button></div>
     </div>`});
@@ -1207,7 +1306,7 @@ $('addCE').onclick=()=>{legs.push(L('B','CE',nearestK(mkt.spot)));renderLegs();r
 $('addPE').onclick=()=>{legs.push(L('B','PE',nearestK(mkt.spot)));renderLegs();renderPos()};
 $('addFUT').onclick=()=>{legs.push(L('B','FUT',0));renderLegs();renderPos()};
 $('toLtp').onclick=()=>{legs.forEach(l=>{const q=quote(l.type,l.k);if(q!=null)l.px=q});renderLegs();renderPos()};
-$('startTrade').onclick=e=>{const ls=legs.filter(l=>l.on);if(ls.length)takeTrade(e.target,'Custom ('+ls.length+' legs)',ls)};
+$('startTrade').onclick=e=>{const ls=legs.filter(l=>l.on);if(ls.length)takeTrade(e.target,nameOf(ls),ls)};
 $('clear').onclick=()=>{legs=[];renderLegs();renderPos()};
 
 let view=null;
@@ -1222,6 +1321,7 @@ function renderPos(){
   $('stats').innerHTML=s('Live MTM',inr(a.mtm),cls(a.mtm))+s('Max profit',inr(a.mx),'pos')+s('Max loss',inr(a.mn),'neg')+
     s('Breakeven',a.be.length?a.be.map(b=>b.toFixed(0)).join(' / '):'—')+s('Net premium',(a.net>=0?'Cr ':'Dr ')+inr(Math.abs(a.net)),a.net>=0?'pos':'neg')+
     s('Prob. profit',a.pop==null?'—':(a.pop*100).toFixed(1)+'%')+s('Delta',a.G.d.toFixed(1))+s('Theta/day',inr(a.G.t),cls(a.G.t))+s('Vega/1%',inr(a.G.v))+s('Gamma',a.G.g.toFixed(3));
+  {const c=capital(ls);$('stats').innerHTML=s('Funds needed ≈',inr(c.total))+s('Premium paid',inr(c.paid))+s('Premium received',inr(c.recv))+s('Margin (est.)',inr(c.margin))+s('Charges (round trip)',inr(c.charges))+$('stats').innerHTML}
   draw(ls);table(ls);
 }
 function draw(ls){
@@ -1265,7 +1365,7 @@ function readout(ev){if(!view)return;const r=$('cv').getBoundingClientRect(),cx=
 ['dfw','ivs'].forEach(id=>$(id).addEventListener('input',renderPos));
 
 // ---------------- orchestration ----------------
-function renderAll(){feats=features();renderStatus();renderStrip(feats);renderTrade(feats);renderHist();renderRead(feats);renderLU(feats);renderSugs(feats);renderEvents(feats);renderNews(feats);renderChain();renderPos();drawPad()}
+function renderAll(){feats=features();renderStatus();renderStrip(feats);renderTrade(feats);renderHist();renderMode();renderRead(feats);renderLU(feats);renderSugs(feats);renderEvents(feats);renderNews(feats);renderChain();renderPos();drawPad()}
 let busy=false;
 async function refreshChain(){if(busy)return;busy=true;try{await loadChain();renderAll()}finally{busy=false}}
 async function refreshAll(){if(busy)return;busy=true;try{await loadContext();if(!expiriesTried)await loadExpiries();await loadChain();renderAll()}finally{busy=false}}
@@ -1276,7 +1376,7 @@ window.addEventListener('resize',()=>{if(mkt){renderPos();drawPad()}});
 function bindSetting(id,key,parse){const el=$(id);el.value=cfg[key];el.addEventListener('change',()=>{cfg[key]=parse(el.value)||DEF[key];el.value=cfg[key];store.set('cfg',cfg);
   if(key==='worker'){expiriesTried=false;refreshAll()}else if(mkt){enrichChain();renderAll()}})}
 cfg={...DEF,...store.get('cfg',{})};legs=store.get('legs',[]);
-bindSetting('wurl','worker',s=>s.trim());bindSetting('lot','lot',Number);bindSetting('rate','rate',Number);bindSetting('budget','budget',Number);bindSetting('charges','charges',Number);
+bindSetting('wurl','worker',s=>s.trim());bindSetting('lot','lot',Number);bindSetting('rate','rate',Number);bindSetting('budget','budget',Number);bindSetting('charges','charges',Number);bindSetting('paperCap','paperCap',Number);
 
 (async()=>{
   $('expiry').innerHTML=tuesdays(6).map(s=>`<option>${s}</option>`).join('');
