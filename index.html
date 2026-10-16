@@ -171,7 +171,8 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
     <div class="tgrid">
       <label class="f">Max loss ₹<input id="tgLoss" type="number" step="1000" min="1000" value="10000"></label>
       <label class="f">Target profit ₹<input id="tgProfit" type="number" step="1000" min="0" value="10000"></label>
-      <label class="f">Min chance of profit %<input id="tgPop" type="number" step="5" min="0" max="95" value="50"></label>
+      <label class="f">Min chance of profit %<input id="tgPop" type="number" step="5" min="0" max="95" placeholder="Optional"></label>
+      <label class="f">Max legs<select id="tgLegs"><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option><option value="12" selected>No limit</option></select></label>
       <label class="f">Market view<select id="tgView"><option value="auto">Use market read</option><option value="bull">Bullish</option><option value="bear">Bearish</option><option value="neutral">Range-bound</option><option value="move">Big move</option><option value="any">Any</option></select></label>
       <label class="note" style="display:flex;gap:6px;align-items:center;align-self:end;padding-bottom:8px"><input id="tgUnl" type="checkbox" style="width:auto">Unlimited profit</label>
     </div>
@@ -184,7 +185,7 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
     <canvas id="dcv" style="height:280px;touch-action:none;border-radius:6px" aria-label="Payoff drawing pad"></canvas>
     <div class="toolbar">
       <button class="sm" id="dClear">Clear</button>
-      <label class="f" style="width:96px">Max legs<select id="dLegs"><option>2</option><option>3</option><option selected>4</option></select></label>
+      <label class="f" style="width:96px">Max legs<select id="dLegs"><option>2</option><option>3</option><option>4</option><option>6</option><option>8</option><option value="12" selected>No limit</option></select></label>
       <label class="note" style="display:flex;gap:6px;align-items:center"><input id="dSell" type="checkbox" checked style="width:auto">Allow selling</label>
       <button class="sm pri" id="dFind">Find strategy</button>
     </div>
@@ -840,16 +841,16 @@ function solveDraw(){
   const n=G.length,lt=lot(),dot=(a,b)=>{let s=0;for(let i=0;i<n;i++)s+=Wt[i]*a[i]*b[i];return s},nT=Math.sqrt(dot(T,T));
   if(nT<1)return{err:'The drawing is flat on zero. Draw where you want profit and loss.'};
   let rows=ch.rows.filter(r=>r.k>=lo-50&&r.k<=hi+50);if(rows.length>26)rows=rows.filter(r=>r.k%100===0);
-  const ins=[];for(const r of rows)for(const ty of['CE','PE']){const o=r[ty.toLowerCase()];if(!o||!(o.ltp>0))continue;
+  const ins=[];for(const r of rows)for(const ty of['CE','PE']){const o=r[ty.toLowerCase()];if(!liquid(o))continue;
     const v=new Float64Array(n);for(let i=0;i<n;i++)v[i]=((ty==='CE'?Math.max(G[i]-r.k,0):Math.max(r.k-G[i],0))-o.ltp)*lt;ins.push({ty,k:r.k,px:o.ltp,v})}
   const maxLegs=+$('dLegs').value,sell=$('dSell').checked,BW=40;
   const score=(P,legs)=>{const nP=Math.sqrt(dot(P,P));return nP<1?-1:dot(P,T)/(nP*nT)-0.012*legs};
   let beam=[{q:{},P:new Float64Array(n),legs:0,lots:0,s:-1}],best=new Map();
   for(let d=0;d<maxLegs+3;d++){const next=new Map();
     for(const st of beam)for(let i=0;i<ins.length;i++)for(const dq of sell?[1,-1]:[1]){
-      const q0=st.q[i]||0,q1=q0+dq;if(Math.abs(q1)>3)continue;
+      const q0=st.q[i]||0,q1=q0+dq;if(Math.abs(q1)>4)continue;
       const legs=st.legs+(q0===0?1:0)-(q1===0?1:0);if(legs>maxLegs||legs===0)continue;
-      const lots=st.lots-Math.abs(q0)+Math.abs(q1);if(lots>6)continue;
+      const lots=st.lots-Math.abs(q0)+Math.abs(q1);if(lots>Math.max(6,maxLegs*2))continue;
       const q={...st.q};if(q1)q[i]=q1;else delete q[i];
       const key=Object.keys(q).sort((a,b)=>a-b).map(k=>k+':'+q[k]).join(',');if(next.has(key)||best.has(key)&&d>0&&next.size>4000)continue;
       const P=new Float64Array(st.P);const v=ins[i].v;for(let j=0;j<n;j++)P[j]+=dq*v[j];
@@ -876,7 +877,16 @@ function nameOf(legs){
     if(b.length===2)return same?(c[0].lots>p[0].lots?'Strap':c[0].lots<p[0].lots?'Strip':'Long Straddle'):'Long Strangle';
     if(s.length===2)return same?'Short Straddle':'Short Strangle';
     return c[0].side==='B'?'Synthetic long (risk reversal)':'Synthetic short (risk reversal)'}
-  if(legs.length===4&&c.length===2&&p.length===2&&s.length===2)return s[0].k===s[1].k?'Iron Fly':'Iron Condor';
+  if(legs.length===4&&c.length===2&&p.length===2&&s.length===2&&legs.every(l=>l.lots===legs[0].lots)){
+    const sc=c.find(l=>l.side==='S'),bc=c.find(l=>l.side==='B'),sp=p.find(l=>l.side==='S'),bp=p.find(l=>l.side==='B');
+    if(sc&&bc&&sp&&bp&&bc.k>sc.k&&bp.k<sp.k&&sp.k<=sc.k)return sp.k===sc.k?'Iron Fly':'Iron Condor'}
+  const one=x=>x.length===legs.length;
+  if(legs.length===3&&(one(c)||one(p))&&s.length===1&&b.length===2&&s[0].lots===2&&b[0].lots===1&&b[1].lots===1){
+    const ks=legs.map(l=>l.k).sort((x,y)=>x-y);return(ks[1]-ks[0]===ks[2]-ks[1]?'':'Broken-wing ')+(one(c)?'Call':'Put')+' Butterfly'}
+  if(legs.length===4&&(one(c)||one(p))&&s.length===2&&b.length===2){const ks=legs.slice().sort((x,y)=>x.k-y.k);
+    if(ks[0].side==='B'&&ks[3].side==='B')return(one(c)?'Call':'Put')+' Condor'}
+  if(legs.length===3&&(one(c)||one(p))&&b.length===1&&s.length===2)return(one(c)?'Call':'Put')+' Ladder';
+  if(legs.length===3&&p.length===1&&p[0].side==='S'&&c.length===2&&c.some(l=>l.side==='S')&&c.some(l=>l.side==='B'))return'Jade Lizard';
   return'Custom '+legs.length+'-leg';
 }
 $('dFind').onclick=()=>{
@@ -899,13 +909,61 @@ $('dRes').addEventListener('click',e=>{const t=e.target;
   if(t.dataset.dload!=null){legs=dRes[+t.dataset.dload].legs.map(l=>({...l}));renderLegs();renderPos();$('legs').scrollIntoView({behavior:'smooth',block:'start'});return}
   const card=t.closest('[data-dsel]');if(card){dSel=+card.dataset.dsel;[...$('dRes').querySelectorAll('[data-dsel]')].forEach(c=>c.classList.toggle('top',c===card));drawPad()}});
 
+// ---------------- free-form optimizer: any number of legs, any buy/sell mix ----------------
+// liquid = has a price and (when NSE sends volume) actually traded, so stale LTPs are not used
+const liquid=o=>!!o&&o.ltp>0&&(o.vol==null||o.vol>0||ch.src!=='NSE');
+const MAXLEGS_ALL=12;
+function tgOptimize(maxL,tgtP,unl,minPop,view,f,maxLegs){
+  const S=mkt.spot,T=Math.max(dteDays(),0.02)/365,r=cfg.rate/100,v=((f&&f.atmIV)||mkt.vix||13)/100,sd=v*Math.sqrt(T),lt=lot();
+  const w=Math.max(S*sd*3,S*0.04);
+  let rows=ch.rows.filter(x=>x.k>=S-w&&x.k<=S+w);if(rows.length>30)rows=rows.filter(x=>x.k%100===0);
+  const ins=[];for(const x of rows)for(const ty of['CE','PE']){const o=x[ty.toLowerCase()];if(!liquid(o)||o.ltp<3)continue;
+    const g=bs(ty,S,x.k,T,r,ivAt(ty,x.k));ins.push({ty,k:x.k,px:o.ltp,d:g.d,vg:g.v})}
+  if(!ins.length)return[];
+  // price grid: lognormal points (weighted) + every strike + 0 and 3×spot (weight 0) so max loss/profit are exact
+  const G=[],Wt=[];for(let i=0;i<=140;i++){const z=-4.5+9*i/140;G.push(S*Math.exp((r-v*v/2)*T+sd*z));Wt.push(npdf(z))}
+  for(const it of ins){G.push(it.k);Wt.push(0)}G.push(0.01);Wt.push(0);G.push(S*3);Wt.push(0);
+  const n=G.length,WS=Wt.reduce((a,b)=>a+b,0);
+  for(const it of ins){const slip=2*Math.max(0.5,0.006*it.px);it.v=new Float64Array(n);for(let i=0;i<n;i++)it.v[i]=((it.ty==='CE'?Math.max(G[i]-it.k,0):Math.max(it.k-G[i],0))-it.px-slip)*lt}
+  const NL=141; // first NL grid points are the realistic ±4.5σ range
+  const evalState=(P0,calls,dl,vg,legs)=>{
+    if(calls<0)return null;const fee=legs*2*cfg.charges;let mn=Infinity,mx=-Infinity,pop=0;
+    const P=P0.map(p=>p-fee);
+    for(let i=0;i<n;i++){const p=P[i];if(p<mn)mn=p;if(i>=31&&i<=109&&p>mx)mx=p;if(Wt[i]&&p>0)pop+=Wt[i]}
+    pop/=WS;if(!(mn<0))return null;const loss1=-mn,m=Math.floor(maxL/loss1);if(m<1)return null;const lots=Math.min(m,50);
+    const MX=calls>0?Infinity:mx*lots;if(unl&&isFinite(MX))return{s:-9};
+    let reach=pop;if(!unl&&tgtP){reach=0;for(let i=0;i<n;i++)if(Wt[i]&&P[i]*lots>=tgtP)reach+=Wt[i];reach/=WS}
+    const MXr=mx*lots,pf=unl?1:tgtP?Math.min(MXr/tgtP,1):1,meets=unl||!tgtP||(MXr>=tgtP&&reach>=0.05),popOK=minPop==null||pop>=minPop;
+    const cat=dl>0.15?'bull':dl<-0.15?'bear':vg>0?'move':'neutral',dir=tgDirFit(cat,view,f);
+    return{s:(meets?0:-0.3)+(popOK?0:-0.3-((minPop||0)-pop))+0.28*pop+0.2*pf+0.25*dir+0.27*reach-(dir<0.15?0.15:0),lots}};
+  const BW=36,depth=maxLegs+3,lotCap=Math.max(6,maxLegs*2);
+  let beam=[{q:{},P:new Float64Array(n),legs:0,tl:0,calls:0,dl:0,vg:0,s:-9}];const best=new Map();
+  for(let dd=0;dd<depth;dd++){const next=new Map();
+    for(const st of beam)for(let i=0;i<ins.length;i++)for(const dq of[1,-1]){
+      const q0=st.q[i]||0,q1=q0+dq;if(Math.abs(q1)>4)continue;
+      const legs=st.legs+(q0===0?1:0)-(q1===0?1:0);if(legs>maxLegs||legs===0)continue;
+      const tl=st.tl-Math.abs(q0)+Math.abs(q1);if(tl>lotCap)continue;
+      const q={...st.q};if(q1)q[i]=q1;else delete q[i];
+      const key=Object.keys(q).sort((a,b)=>a-b).map(k=>k+':'+q[k]).join(',');if(next.has(key))continue;
+      const it=ins[i],P=new Float64Array(st.P);for(let j=0;j<n;j++)P[j]+=dq*it.v[j];
+      const calls=st.calls+(it.ty==='CE'?dq:0),dl=st.dl+dq*it.d,vg=st.vg+dq*it.vg;
+      const e=evalState(P,calls,dl,vg,legs);
+      // states with unlimited call risk stay in the beam (a later buy can fix them) but never become answers
+      next.set(key,{q,P,legs,tl,calls,dl,vg,s:e?e.s-0.01*legs-(legs>4?0.02*(legs-4):0):-5+0.0001*Math.random(),ok:!!e&&e.s>-9,key})}
+    beam=[...next.values()].sort((a,b)=>b.s-a.s).slice(0,BW);
+    for(const b of beam)if(b.ok&&(!best.has(b.key)))best.set(b.key,b)}
+  return[...best.values()].sort((a,b)=>b.s-a.s).slice(0,40).map(b=>{
+    const legs=Object.entries(b.q).map(([i,qq])=>{const it=ins[+i];return{on:true,side:qq>0?'B':'S',type:it.ty,k:it.k,lots:Math.abs(qq),px:it.px}}).sort((x,y)=>x.k-y.k||x.type.localeCompare(y.type));
+    return{fam:nameOf(legs),legs,dl:b.dl,vg:b.vg,custom:true}});
+}
+
 // ---------------- Strategy from your numbers: max loss + target profit ----------------
 const TG_CAT={'Long Call':'bull','Bull Call Spread':'bull','Bull Put Spread':'bull','Call Ratio Backspread':'bull',
   'Long Put':'bear','Bear Put Spread':'bear','Bear Call Spread':'bear','Put Ratio Backspread':'bear',
   'Iron Condor':'neutral','Iron Fly':'neutral','Call Butterfly':'neutral','Put Butterfly':'neutral',
   'Long Straddle':'move','Long Strangle':'move'};
 function tgCandidates(){
-  const a=nearestK(mkt.spot),has=k=>ch.rows.some(r=>r.k===k&&r.ce&&r.pe&&r.ce.ltp>0&&r.pe.ltp>0),C=[];
+  const a=nearestK(mkt.spot),has=k=>ch.rows.some(r=>r.k===k&&liquid(r.ce)&&liquid(r.pe)),C=[];
   const add=(fam,ls)=>{if(ls.every(l=>has(l.k)))C.push({fam,legs:ls})};
   for(let k=a-400;k<=a+400;k+=50)for(let w=100;w<=500;w+=100){
     add('Bull Call Spread',[L('B','CE',k),L('S','CE',k+w)]);add('Bear Put Spread',[L('B','PE',k),L('S','PE',k-w)]);
@@ -924,10 +982,13 @@ function tgCandidates(){
 function tgEval(ls){
   const S=mkt.spot,T=Math.max(dteDays(),0.02)/365,r=cfg.rate/100,v=((feats&&feats.atmIV)||mkt.vix||13)/100,sd=v*Math.sqrt(T);
   let up=0;for(const l of ls)if(l.type!=='PE')up+=sgn(l)*l.lots;
-  let mn=Infinity,mx=-Infinity;for(const x of[0,...ls.map(l=>l.k),S*3]){const p=expiryPL(x,ls);mn=Math.min(mn,p);mx=Math.max(mx,p)}
+  let mn=Infinity,mx=-Infinity;const lo=S*Math.exp(-2.5*sd),hi=S*Math.exp(2.5*sd);
+  for(const x of[0,...ls.map(l=>l.k),S*3]){const p=expiryPL(x,ls);mn=Math.min(mn,p)}
+  for(const x of[lo,hi,...ls.map(l=>l.k).filter(k=>k>lo&&k<hi)]){mx=Math.max(mx,expiryPL(x,ls))}
+  const fee=ls.length*2*cfg.charges;mn-=fee;mx-=fee;const mxr=mx;
   if(up<0)mn=-Infinity;if(up>0)mx=Infinity;
   let W=0,pop=0;for(let i=0;i<=160;i++){const z=-4+8*i/160,w=npdf(z);W+=w;if(expiryPL(S*Math.exp((r-v*v/2)*T+sd*z),ls)>0)pop+=w}
-  return{mn,mx,pop:pop/W}}
+  return{mn,mx,mxr,pop:pop/W}}
 function tgReach(ls,tgt){
   const S=mkt.spot,T=Math.max(dteDays(),0.02)/365,r=cfg.rate/100,v=((feats&&feats.atmIV)||mkt.vix||13)/100,sd=v*Math.sqrt(T);
   let W=0,p=0;for(let i=0;i<=160;i++){const z=-4+8*i/160,w=npdf(z);W+=w;if(expiryPL(S*Math.exp((r-v*v/2)*T+sd*z),ls)>=tgt)p+=w}return p/W}
@@ -937,29 +998,32 @@ function tgDirFit(cat,view,f){
   const bull=clamp(f.dir*2.2,0,1),bear=clamp(-f.dir*2.2,0,1),n=clamp(1-Math.abs(f.dir)*1.8,0,1);
   return{bull,bear,neutral:n*(f.eventRisk?.6:1),move:(f.eventRisk?.7:0)+(f.vol==='Low'?.3:0)}[cat]}
 function tgRun(){
-  const minPop=clamp(+$('tgPop').value||0,0,95)/100,maxL=Math.abs(+$('tgLoss').value||0),tgtP=Math.abs(+$('tgProfit').value||0),unl=$('tgUnl').checked,view=$('tgView').value,f=feats;
+  const popRaw=$('tgPop').value.trim(),minPop=popRaw===''?null:clamp(+popRaw||0,0,95)/100,maxL=Math.abs(+$('tgLoss').value||0),tgtP=Math.abs(+$('tgProfit').value||0),unl=$('tgUnl').checked,view=$('tgView').value,f=feats;
   if(!maxL)return{err:'Enter the most you are willing to lose.'};
   if(!ch||!ch.rows.length)return{err:'Option chain not loaded yet.'};
   const all=[];
-  for(const c of tgCandidates()){const e1=tgEval(c.legs);if(!isFinite(e1.mn)||e1.mn>=0)continue;
+  const mxLegs=+$('tgLegs').value||MAXLEGS_ALL;
+  for(const c of[...tgCandidates().filter(c=>c.legs.length<=mxLegs),...tgOptimize(maxL,tgtP,unl,minPop,view,f,mxLegs)]){const e1=tgEval(c.legs);if(!isFinite(e1.mn)||e1.mn>=0)continue;
     const loss1=-e1.mn,n=Math.floor(maxL/loss1),lots=clamp(n,1,20),fits=n>=1;
     const mx=isFinite(e1.mx)?e1.mx*lots:Infinity,loss=loss1*lots;
     if(unl&&isFinite(mx))continue;
-    const pf=unl?1:tgtP?Math.min(mx/tgtP,1):1,meets=unl||!tgtP||mx>=tgtP;
-    const dir=tgDirFit(TG_CAT[c.fam],view,f),popOK=e1.pop>=minPop;
+    const mxr=e1.mxr*lots,pf0=unl?1:tgtP?Math.min(mxr/tgtP,1):1;
+    const cat=TG_CAT[c.fam]||(c.dl>0.15?'bull':c.dl<-0.15?'bear':c.vg>0?'move':'neutral');c.cat=cat;
+    const dir=tgDirFit(cat,view,f),popOK=minPop==null||e1.pop>=minPop;
     const sized=c.legs.map(l=>({...l,lots:l.lots*lots})),reach=unl||!tgtP?e1.pop:tgReach(sized,tgtP);
-    const score=(fits?0:-1)+(meets?0:-0.3)+(popOK?0:-0.3-(minPop-e1.pop))+0.28*e1.pop+0.27*pf+0.25*dir+0.2*reach-(dir<0.15?0.15:0);
+    const pf=pf0,meets=unl||!tgtP||(mxr>=tgtP&&reach>=0.05);
+    const score=(fits?0:-1)+(meets?0:-0.3)+(popOK?0:-0.3-((minPop||0)-e1.pop))+0.28*e1.pop+0.2*pf+0.25*dir+0.27*reach-(dir<0.15?0.15:0);
     all.push({...c,lots,fits,meets,popOK,loss,mx,pop:e1.pop,reach,dir,score})}
   all.sort((a,b)=>b.score-a.score);
   // trade-off hints for when the three numbers cannot all be met
   const okL=all.filter(c=>c.fits);
-  const bestMxAtPop=okL.filter(c=>c.popOK).reduce((m,c)=>Math.max(m,c.mx),-Infinity);
+  const bestMxAtPop=minPop==null?-Infinity:okL.filter(c=>c.popOK).reduce((m,c)=>Math.max(m,c.mx),-Infinity);
   const bestPopAtTgt=okL.filter(c=>c.meets).reduce((m,c)=>Math.max(m,c.pop),-1);
   const out=[],famSeen={},keyOf=c=>c.legs.map(l=>l.side+l.type+l.k).join(),keys=new Set(),push=(c,tag)=>{if(!c||keys.has(keyOf(c))||(!tag&&famSeen[c.fam]))return;famSeen[c.fam]=1;keys.add(keyOf(c));out.push({...c,tag})};
   if(!all.some(c=>c.fits&&c.meets&&c.popOK)){
     const byP=okL.filter(c=>c.popOK&&c.dir>=0.5).sort((a,b)=>b.mx-a.mx)[0]||okL.filter(c=>c.popOK).sort((a,b)=>b.mx-a.mx)[0];
     const byT=okL.filter(c=>c.meets&&c.dir>=0.5).sort((a,b)=>b.pop-a.pop)[0]||okL.filter(c=>c.meets).sort((a,b)=>b.pop-a.pop)[0];
-    push(byP,'Meets your probability');push(byT,'Meets your profit target')}
+    if(minPop!=null)push(byP,'Meets your probability');push(byT,minPop!=null?'Meets your profit target':'')}
   for(const c of all){if(out.length>=3)break;push(c,'')}
   return{out,n:all.length,maxL,tgtP,unl,minPop,bestMxAtPop,bestPopAtTgt}}
 $('tgFind').onclick=()=>{
@@ -970,23 +1034,24 @@ $('tgFind').onclick=()=>{
   tgList=r.out.map(c=>({...c,legs:c.legs.map(l=>({...l,lots:l.lots*c.lots}))}));
   const hints=[];
   if(!anyMeets){
-    if(isFinite(r.bestMxAtPop)&&r.bestMxAtPop>0)hints.push(`With at least ${Math.round(r.minPop*100)}% chance of profit and ${inr(r.maxL)} max loss, the most you can target is about <b>${inr(r.bestMxAtPop)}</b>.`);
+    if(r.minPop==null){}
+    else if(isFinite(r.bestMxAtPop)&&r.bestMxAtPop>0)hints.push(`With at least ${Math.round(r.minPop*100)}% chance of profit and ${inr(r.maxL)} max loss, the most you can target is about <b>${inr(r.bestMxAtPop)}</b>.`);
     else hints.push(`No strategy within ${inr(r.maxL)} max loss has a ${Math.round(r.minPop*100)}% chance of profit right now.`);
     if(!r.unl&&r.tgtP){if(r.bestPopAtTgt>=0)hints.push(`To target ${inr(r.tgtP)} within ${inr(r.maxL)} max loss, the best chance of profit available is about <b>${Math.round(r.bestPopAtTgt*100)}%</b>.`);
       else hints.push(`No strategy reaches ${inr(r.tgtP)} profit within ${inr(r.maxL)} max loss.`)}}
-  box.innerHTML=(anyMeets?'':`<div class="banner">Your three numbers can't all be met right now, so these are the closest.<br>${hints.join('<br>')}<br>Higher profit, lower loss and higher probability always pull against each other.</div>`)+
+  box.innerHTML=(anyMeets?'':`<div class="banner">Your numbers can't all be met right now, so these are the closest.<br>${hints.join('<br>')}<br>Higher profit, lower loss and higher probability always pull against each other.</div>`)+
    `<p class="note">${r.n} sized strategies checked on the ${esc($('expiry').value)} chain.</p>`+
-   tgList.map((c,i)=>{const a=analyse(c.legs),rr=isFinite(a.mx)&&a.mn<0?(a.mx/-a.mn).toFixed(2):'∞';
+   tgList.map((c,i)=>{const a=analyse(c.legs),rr=isFinite(c.mx)&&c.loss>0?(c.mx/c.loss).toFixed(2):'∞';
     const why=[];
-    why.push(c.fits?`Max loss ${inr(a.mn)} is within your ${inr(r.maxL)} limit (${c.lots} lot${c.lots>1?'s':''})`:`Even 1 lot loses up to ${inr(a.mn)}, more than your limit`);
-    if(!r.unl&&r.tgtP)why.push(isFinite(a.mx)?(a.mx>=r.tgtP?`Max profit ${inr(a.mx)} meets your ${inr(r.tgtP)} target`:`Max profit ${inr(a.mx)} is short of your ${inr(r.tgtP)} target`):'Profit is open-ended above the breakeven');
-    why.push(c.popOK?`${(c.pop*100).toFixed(0)}% chance of profit at expiry, above your ${Math.round(r.minPop*100)}% minimum`:`${(c.pop*100).toFixed(0)}% chance of profit, below your ${Math.round(r.minPop*100)}% minimum`);
-    const cat=TG_CAT[c.fam],vw=$('tgView').value;
+    why.push(c.fits?`Max loss ${inr(-c.loss)} incl. charges is within your ${inr(r.maxL)} limit (size ×${c.lots})`:`Even the smallest size loses up to ${inr(-c.loss)}, more than your limit`);
+    if(!r.unl&&r.tgtP)why.push(isFinite(c.mx)?(c.mx>=r.tgtP?`Max profit ${inr(c.mx)} meets your ${inr(r.tgtP)} target`:`Max profit ${inr(c.mx)} is short of your ${inr(r.tgtP)} target`):'Profit is open-ended above the breakeven');
+    why.push(r.minPop==null?`${(c.pop*100).toFixed(0)}% chance of profit at expiry`:c.popOK?`${(c.pop*100).toFixed(0)}% chance of profit at expiry, above your ${Math.round(r.minPop*100)}% minimum`:`${(c.pop*100).toFixed(0)}% chance of profit, below your ${Math.round(r.minPop*100)}% minimum`);
+    const cat=c.cat||TG_CAT[c.fam],vw=$('tgView').value;
     why.push(vw==='auto'?`Market read is ${feats.dirLbl.toLowerCase()}, ${feats.vol.toLowerCase()} volatility${feats.eventRisk?', event before expiry':''}: ${c.dir>=.6?'good fit':c.dir>=.3?'partial fit':'weak fit'} for a ${({bull:'bullish',bear:'bearish',neutral:'range-bound',move:'big-move'})[cat]} trade`:`Matches your ${({bull:'bullish',bear:'bearish',neutral:'range-bound',move:'big-move',any:'any'})[vw]} view`);
     return `<div class="sug${i===0?' top':''}">
     <div class="sug-h"><strong>${i+1}. ${c.fam}</strong>${c.tag?`<span class="flag" style="color:var(--accent)">${c.tag}</span>`:''}<span class="flag">${c.lots} lot${c.lots>1?'s':''} · R:R ${rr}</span></div>
     <ol class="orders">${c.legs.map(l=>`<li>${l.side==='B'?'Buy':'Sell'} ${l.lots}× ${l.k} ${l.type} @ ${num(l.px)}</li>`).join('')}</ol>
-    <div class="m"><span>Max P <b class="pos">${inr(a.mx)}</b></span><span>Max L <b class="neg">${inr(a.mn)}</b></span><span>Chance of profit <b class="${c.popOK?'':'neg'}">${(c.pop*100).toFixed(0)}%</b></span>${!r.unl&&r.tgtP?`<span>Chance of ≥ ${inr(r.tgtP)} <b>${(c.reach*100).toFixed(0)}%</b></span>`:''}<span>BE <b>${a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span><span>${a.net>=0?'Credit':'Debit'} <b>${inr(Math.abs(a.net))}</b></span></div>
+    <div class="m"><span>Max P <b class="pos">${inr(c.mx)}</b></span><span>Max L <b class="neg">${inr(-c.loss)}</b></span><span>Chance of profit <b class="${c.popOK?'':'neg'}">${(c.pop*100).toFixed(0)}%</b></span>${!r.unl&&r.tgtP?`<span>Chance of ≥ ${inr(r.tgtP)} <b>${(c.reach*100).toFixed(0)}%</b></span>`:''}<span>BE <b>${a.be.map(x=>x.toFixed(0)).join(' / ')||'—'}</b></span><span>${a.net>=0?'Credit':'Debit'} <b>${inr(Math.abs(a.net))}</b></span></div>
     <ul>${why.map(w=>`<li>${esc(w)}</li>`).join('')}</ul>
     <div class="toolbar"><button class="sm pri" data-tgtake="${i}">Take trade</button><button class="sm" data-tgload="${i}">Load into builder</button></div></div>`}).join('');
 };
