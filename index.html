@@ -26,6 +26,7 @@
   --accent:#5aa6f0; --profit:#3fbf7f; --loss:#f06a60; --t0:#e0a63a; --warn:#e0a63a;
   --profit-fill:rgba(63,191,127,.16); --loss-fill:rgba(240,106,96,.15); --itm:rgba(90,166,240,.08); color-scheme:dark}
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 body{background:var(--bg);color:var(--fg);font-family:var(--ui);font-size:15px;padding:0 16px}
 .wrap{max-width:1200px;margin:0 auto;padding-block:12px 40px;display:grid;gap:14px}
 header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
@@ -99,6 +100,8 @@ th{font-family:var(--ui);font-weight:600;color:var(--muted);font-size:.68rem;tex
 .seg button.on.b{background:var(--accent);color:#fff}
 #tapB.on{background:var(--profit)}
 .jrow{border:1px solid var(--line);border-radius:8px}
+.jsum{display:grid;grid-template-columns:56px 1fr auto;gap:8px;padding:8px 10px;align-items:center}
+.jopen{border-color:var(--accent)}
 .jrow summary{display:grid;grid-template-columns:56px 1fr auto;gap:8px;padding:8px 10px;align-items:center;cursor:pointer;list-style:none}
 .jrow summary::-webkit-details-marker{display:none}
 .jd{font-family:var(--num);font-size:.78rem;color:var(--muted)}.jn{min-width:0;overflow-wrap:anywhere}.jp{font-family:var(--num);font-weight:600}
@@ -125,6 +128,17 @@ label.f{display:grid;gap:3px;min-width:0;font-size:.7rem;color:var(--muted);text
 table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8rem;color:var(--muted)}
 .toast{position:fixed;left:16px;right:16px;bottom:0;margin:0 auto;max-width:640px;z-index:9;background:var(--fg);color:var(--bg);padding:12px 14px calc(12px + env(safe-area-inset-bottom,0px));border-radius:10px 10px 0 0;font-size:.9rem;font-weight:600}
 .tgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.tabs{display:flex;gap:4px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:4px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+.tabs button{flex:1;border:none;background:none;padding:9px 4px;font-weight:600;font-size:.9rem;color:var(--muted);border-radius:7px;position:relative}
+.tabs button.on{background:var(--accent);color:#fff}
+.badge{display:inline-block;min-width:18px;padding:0 5px;margin-left:5px;border-radius:9px;background:var(--loss);color:#fff;font-size:.7rem;line-height:18px;font-family:var(--num)}
+.page{display:grid;gap:14px}
+@media(max-width:899px){
+  .tabs{position:fixed;left:0;right:0;bottom:0;top:auto;border-radius:0;border-width:1px 0 0;padding:4px 6px calc(4px + env(safe-area-inset-bottom,0px));z-index:8}
+  .tabs button{font-size:.78rem;padding:10px 2px}
+  .wrap{padding-bottom:84px}
+  .toast{bottom:calc(58px + env(safe-area-inset-bottom,0px))}
+}
 .banner{border:1px solid var(--warn);color:var(--warn);border-radius:8px;padding:8px 11px;font-size:.84rem}
 @media(max-width:560px){.leg .l1{grid-template-columns:64px 60px 1fr 1fr}.leg .l1 .x{justify-self:start}}
 @media(max-width:430px){.read li{grid-template-columns:80px 1fr}}
@@ -137,15 +151,24 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
   <div class="status"><span class="seg" title="New trades are paper (simulated) or real (you place the orders)"><button class="b" id="modeP">Paper</button><button class="b" id="modeR">Real</button></span><span id="acct" class="note"></span><span id="pill" class="pill model">CONNECTING</span><span id="stamp"></span><button class="sm" id="refresh">Refresh</button></div>
 </header>
 <div class="banner" id="banner" hidden></div>
-<div class="strip" id="strip"></div>
-<section class="panel" id="tradeBox" hidden></section>
 <div class="toast" id="toast" role="status" hidden></div>
 
+<nav class="tabs" id="tabs" aria-label="Pages">
+  <button data-go="market" class="on">Market</button><button data-go="build">Builder</button><button data-go="find">Find</button><button data-go="trades">Trades<span class="badge" id="tBadge" hidden></span></button><button data-go="settings">Settings</button>
+</nav>
+
+<div class="page" data-page="market">
+<div class="strip" id="strip"></div>
 <div class="cols">
 <div class="stack">
   <section class="panel">
     <h2>Market read</h2>
     <ul class="read" id="read"></ul>
+  </section>
+  <section class="panel">
+    <div class="toolbar" style="justify-content:space-between"><h2>Suggested strategies</h2><span class="note" id="sugNote"></span></div>
+    <div id="sugs" style="display:grid;gap:10px"></div>
+    <p class="note">Rules-based read of trend, India VIX, option chain OI, events before expiry and headline tone. It is a starting point for your own judgement, not trading advice.</p>
   </section>
   <section class="panel">
     <div class="toolbar" style="justify-content:space-between"><h2>Limited loss · unlimited profit</h2><span class="note" id="luNote"></span></div>
@@ -155,11 +178,8 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
     <details><summary>Best of each structure</summary><div class="tw" style="margin-top:8px"><table id="luAll"></table></div></details>
     <p class="note">The trade-off: capped loss with open-ended profit means paying for options, so these usually win less than half the time and lose a little every day (theta) unless Nifty moves. Profit comes from a big move, not from waiting.</p>
   </section>
-  <section class="panel">
-    <div class="toolbar" style="justify-content:space-between"><h2>Suggested strategies</h2><span class="note" id="sugNote"></span></div>
-    <div id="sugs" style="display:grid;gap:10px"></div>
-    <p class="note">Rules-based read of trend, India VIX, option chain OI, events before expiry and headline tone. It is a starting point for your own judgement, not trading advice.</p>
-  </section>
+</div>
+<div class="stack">
   <section class="panel">
     <h2>Events before expiry</h2>
     <ul class="list" id="events"></ul>
@@ -168,15 +188,48 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
     <div class="toolbar" style="justify-content:space-between"><h2>Headlines</h2><span class="note" id="newsTone"></span></div>
     <ul class="list" id="news"></ul>
   </section>
-  <section class="panel" id="histBox">
-    <div class="toolbar" style="justify-content:space-between"><h2>Trade journal</h2><span class="seg" id="jFilt"><button class="b on" data-jf="all">All</button><button class="b" data-jf="paper">Paper</button><button class="b" data-jf="real">Real</button></span></div>
-    <div class="stats" id="jStats"></div>
-    <div id="jList" style="display:grid;gap:6px"></div>
-    <div class="toolbar"><button class="sm" id="jCsv">Export CSV</button><button class="sm" id="jJson">Backup</button><label class="sm restore" for="jImp">Restore<input type="file" id="jImp" accept=".json,application/json" hidden></label></div>
-    <p class="note">Every trade is saved on this device as it happens. Use Backup now and then to keep a copy in Files or iCloud.</p>
-  </section>
+</div>
+</div>
 </div>
 
+<div class="page" data-page="build" hidden>
+<div class="cols">
+<div class="stack">
+  <section class="panel">
+    <div class="toolbar" style="justify-content:space-between">
+      <h2>Position</h2>
+      <label class="f" style="width:150px">Expiry<select id="expiry"></select></label>
+    </div>
+    <div class="legs" id="legs"></div>
+    <div class="toolbar">
+      <button class="sm" id="addCE">+ CE</button><button class="sm" id="addPE">+ PE</button><button class="sm" id="addFUT">+ FUT</button>
+      <button class="sm" id="toLtp" title="Set every entry price to the current LTP">Entry = LTP</button>
+      <button class="sm" id="clear">Clear</button><button class="sm pri" id="startTrade">Take trade</button>
+    </div>
+    <div class="stats" id="stats"></div>
+    <canvas id="cv" class="chartbits"></canvas>
+    <div class="key chartbits"><span><i style="border-color:var(--profit)"></i>At expiry</span><span><i style="border-color:var(--t0);border-top-style:dashed"></i>Target date</span><span><i style="border-color:var(--accent);border-top-style:dotted"></i>Spot</span></div>
+    <div class="tip chartbits" id="tip">Tap or drag on the chart to read P&amp;L at a level.</div>
+    <div class="sl chartbits"><span>Days forward</span><input id="dfw" type="range" min="0" max="7" step="0.25" value="0"><output id="dfwO">0</output></div>
+    <div class="sl chartbits"><span>IV change</span><input id="ivs" type="range" min="-8" max="8" step="0.5" value="0"><output id="ivsO">0</output></div>
+    <div class="tw"><table id="tbl"></table></div>
+  </section>
+</div>
+<div class="stack">
+  <section class="panel">
+    <div class="toolbar" style="justify-content:space-between">
+      <h2>Option chain</h2>
+      <span class="toolbar"><span class="note">Tap a price to</span><span class="seg"><button class="b on" id="tapB">Buy</button><button class="s" id="tapS">Sell</button></span></span>
+    </div>
+    <div class="tw"><table id="chain"></table></div>
+    <p class="note" id="chainNote"></p>
+  </section>
+</div>
+</div>
+</div>
+
+<div class="page" data-page="find" hidden>
+<div class="cols">
 <div class="stack">
   <section class="panel" id="tgBox">
     <div class="toolbar" style="justify-content:space-between"><h2>Strategy from your numbers</h2><span class="note">Lots are sized to keep within your max loss.</span></div>
@@ -191,6 +244,8 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
     <div class="toolbar"><button class="sm pri" id="tgFind">Suggest strategy</button></div>
     <div id="tgRes" style="display:grid;gap:10px"></div>
   </section>
+</div>
+<div class="stack">
   <section class="panel" id="drawBox">
     <div class="toolbar" style="justify-content:space-between"><h2>Draw your payoff</h2><span class="note">Above the line = profit, below = loss. Spot is the dotted line.</span></div>
     <div class="toolbar" id="shapes"></div>
@@ -203,47 +258,36 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
     </div>
     <div id="dRes" style="display:grid;gap:10px"></div>
   </section>
-  <section class="panel">
-    <div class="toolbar" style="justify-content:space-between">
-      <h2>Position</h2>
-      <label class="f" style="width:150px">Expiry<select id="expiry"></select></label>
-    </div>
-    <div class="legs" id="legs"></div>
-    <div class="toolbar">
-      <button class="sm" id="addCE">+ CE</button><button class="sm" id="addPE">+ PE</button><button class="sm" id="addFUT">+ FUT</button>
-      <button class="sm" id="toLtp" title="Set every entry price to the current LTP">Entry = LTP</button>
-      <button class="sm" id="clear">Clear</button><button class="sm pri" id="startTrade">Take trade</button>
-    </div>
-    <div class="stats" id="stats"></div>
-    <canvas id="cv"></canvas>
-    <div class="key"><span><i style="border-color:var(--profit)"></i>At expiry</span><span><i style="border-color:var(--t0);border-top-style:dashed"></i>Target date</span><span><i style="border-color:var(--accent);border-top-style:dotted"></i>Spot</span></div>
-    <div class="tip" id="tip">Tap or drag on the chart to read P&amp;L at a level.</div>
-    <div class="sl"><span>Days forward</span><input id="dfw" type="range" min="0" max="7" step="0.25" value="0"><output id="dfwO">0</output></div>
-    <div class="sl"><span>IV change</span><input id="ivs" type="range" min="-8" max="8" step="0.5" value="0"><output id="ivsO">0</output></div>
-    <div class="tw"><table id="tbl"></table></div>
+</div>
+</div>
+</div>
+
+<div class="page" data-page="trades" hidden>
+<section class="panel" id="tradeEmpty"><h2>Open trades</h2><p class="note">No open trades. Take one from Market, Builder or Find and it appears here and in the Trade log straight away.</p></section>
+<section class="panel" id="tradeBox" hidden></section>
+  <section class="panel" id="histBox">
+    <div class="toolbar" style="justify-content:space-between"><h2>Trade log</h2><span class="seg" id="jFilt"><button class="b on" data-jf="all">All</button><button class="b" data-jf="paper">Paper</button><button class="b" data-jf="real">Real</button></span></div>
+    <div class="stats" id="jStats"></div>
+    <div id="jList" style="display:grid;gap:6px"></div>
+    <div class="toolbar"><button class="sm" id="jCsv">Export CSV</button><button class="sm" id="jJson">Backup</button><label class="sm restore" for="jImp">Restore<input type="file" id="jImp" accept=".json,application/json" hidden></label></div>
+    <p class="note">Every trade is saved as it happens. With a GitHub token in Settings, open trades and this journal sync between your devices through a private gist. <span id="jSync"></span></p>
   </section>
+</div>
+
+<div class="page" data-page="settings" hidden>
   <section class="panel">
-    <div class="toolbar" style="justify-content:space-between">
-      <h2>Option chain</h2>
-      <span class="toolbar"><span class="note">Tap a price to</span><span class="seg"><button class="b on" id="tapB">Buy</button><button class="s" id="tapS">Sell</button></span></span>
-    </div>
-    <div class="tw"><table id="chain"></table></div>
-    <p class="note" id="chainNote"></p>
-  </section>
-  <section class="panel">
-    <details>
-      <summary>Settings</summary>
+    <h2>Settings</h2>
       <div class="row3">
         <label class="f">Data Worker URL<input id="wurl" type="url"></label>
         <label class="f">Lot size<input id="lot" type="number" step="1"></label>
         <label class="f">Rate %<input id="rate" type="number" step="0.1"></label>
         <label class="f">Charges ₹/order<input id="charges" type="number" step="5"></label>
         <label class="f">Paper capital ₹<input id="paperCap" type="number" step="50000"></label>
+        <label class="f">GitHub token (gist scope)<input id="ghToken" type="password" autocomplete="off" placeholder="ghp_…"></label>
       </div>
+      <div class="toolbar" style="margin-top:8px"><button class="sm" id="syncBtn">Sync trades now</button><span class="note" id="syncSt"></span></div>
       <p class="note" style="margin-top:8px">Prices refresh every 15 s during market hours (Mon–Fri 09:15–15:30 IST); headlines, VIX and events every 5 min.</p>
-    </details>
   </section>
-</div>
 </div>
 <p class="note">Live data: NSE option chain, Yahoo Finance (Nifty 50, India VIX), Google News, Forex Factory calendar, RBI MPC calendar. Greeks and target-date curve use Black-Scholes with each strike's market IV. Charges, margin and slippage are not included.</p>
 </div>
@@ -253,7 +297,7 @@ table.cmp td:first-child{white-space:normal;font-family:var(--ui);font-size:.8re
 'use strict';
 const $=id=>document.getElementById(id);
 const STEP=50, IST='Asia/Kolkata';
-const DEF={worker:'https://nifty-options-proxy.mailztoganesh.workers.dev',lot:65,rate:6.5,budget:20000,charges:40,paperCap:500000};
+const DEF={worker:'https://nifty-options-proxy.mailztoganesh.workers.dev',lot:65,rate:6.5,budget:20000,charges:40,paperCap:500000,ghToken:'',gistId:''};
 let cfg={...DEF}, legs=[], tapSide='B';
 let mkt=null, ch=null, newsItems=[], events=[], feats=null, sugList=[];
 let mode='CONNECTING';
@@ -559,14 +603,15 @@ function renderLU(f){
   $('luAll').innerHTML='<tr><th>Structure</th><th>Fit</th><th>Max loss</th><th>Move</th><th>POP</th><th>P(≥2×)</th></tr>'+
     luBest.map((c,i)=>`<tr><td><button class="sm" data-lub="${i}" style="font-family:var(--ui)">${c.fam}</button></td><td>${Math.round(c.score*100)}%</td><td class="neg">${inr(-c.maxLoss)}</td><td>${pct(c.move,1)}</td><td>${(c.pop*100).toFixed(0)}%</td><td>${(c.pBig*100).toFixed(0)}%</td></tr>`).join('');
 }
-function luLoad(c){legs=c.legs.map(l=>({...l}));renderLegs();renderPos();$('legs').scrollIntoView({behavior:'smooth',block:'start'})}
+function luLoad(c){legs=c.legs.map(l=>({...l}));renderLegs();renderPos();go('build')}
 $('lu').addEventListener('click',e=>{if(e.target.dataset.lutake!=null){const c=luList[+e.target.dataset.lutake];takeTrade(e.target,c.fam,c.legs);return}const i=e.target.dataset.lu;if(i!=null)luLoad(luList[+i])});
 $('luAll').addEventListener('click',e=>{const i=e.target.dataset.lub;if(i!=null)luLoad(luBest[+i])});
 
 // ---------------- active trade: tracking, alerts, adjustments ----------------
+let exitArmed=0;
 let trades=store.get('trades',null);if(!trades){const t0=store.get('trade',null);trades=t0?[t0]:[]}
 let trade=trades.find(t=>t.id===store.get('selTrade',0))||trades[0]||null,hist=store.get('hist',[]),adjList=[],adjRec=null;
-const saveTrade=()=>{store.set('trades',trades);store.set('selTrade',trade?trade.id:0);store.set('hist',hist)};
+const saveTrade=()=>{if(trade)trade.upd=Date.now();store.set('trades',trades);store.set('selTrade',trade?trade.id:0);store.set('hist',hist);if(typeof scheduleSync==='function')scheduleSync()};
 const openLegs=()=>trade.legs.map((l,i)=>({...l,i})).filter(l=>l.open);
 const legPL=(l,px)=>sgn(l)*(px-l.px)*l.lots*lot();
 function booked(){let s=0;for(const l of trade.legs)if(!l.open)s+=legPL(l,l.exit);return s-(trade.costs||0)}
@@ -586,7 +631,7 @@ function startTrade(name,ls){
     legs:ls.map(l=>({side:l.side,type:l.type,k:l.k,lots:l.lots,px:l.px,open:true,t:Date.now()})),
     netEntry:net,stop:Math.round(credit?size*1.5:size*0.5),target:Math.round(target),costs:ls.length*cfg.charges,alerted:{},
     log:[{t:Date.now(),txt:`Opened ${name}: ${ls.map(l=>(l.side==='B'?'Buy ':'Sell ')+legTxt(l)+' @ '+num(l.px)).join(', ')} · ${credit?'credit':'debit'} ${inr(Math.abs(net))}${tradeMode==='paper'?' (paper fill at bid/ask)':''}`}]};
-  trades.push(trade);saveTrade();renderAll();$('tradeBox').scrollIntoView({behavior:'smooth',block:'start'});
+  trades.push(trade);saveTrade();renderAll();go('trades');notify(`Trade opened: ${name} (${tradeMode}). It is in the Trade log now.`);
 }
 function closeTrade(note){
   const pnl=booked();trade.log.push({t:Date.now(),txt:`Closed (${note}) · final P&L ${inr(pnl)}`});
@@ -696,8 +741,9 @@ function notify(txt){
 
 function renderTrade(f){
   const box=$('tradeBox');if(document.activeElement&&document.activeElement.id==='tNotes'&&trade)return;
-  if(!trade){box.hidden=true;$('expiry').disabled=false;return}
-  box.hidden=false;
+  $('tBadge').hidden=!trades.length;$('tBadge').textContent=trades.length;
+  if(!trade){box.hidden=true;$('tradeEmpty').hidden=false;$('expiry').disabled=false;return}
+  box.hidden=false;$('tradeEmpty').hidden=true;
   if($('expiry').value!==trade.expiry){if(![...$('expiry').options].some(o=>o.value===trade.expiry))$('expiry').insertAdjacentHTML('afterbegin',`<option>${trade.expiry}</option>`);$('expiry').value=trade.expiry}
   $('expiry').disabled=true;
   // expired: settle at intrinsic on spot
@@ -762,7 +808,7 @@ function renderTrade(f){
      <label class="f" style="width:120px">Target ₹<input id="tTarget" type="number" step="500" value="${trade.target}"></label>
      <button class="sm" id="tView">View in builder</button>
      ${'Notification' in window&&Notification.permission!=='granted'?'<button class="sm" id="tNotif">Turn on alerts</button>':''}
-     <button class="sm" id="tExit">Close trade at LTP</button>
+     <button class="sm" id="tExit">${Date.now()<exitArmed?'Tap again to confirm':(trade.mode==='paper'?'Close trade (paper)':'Close trade at LTP')}</button>
    </div>
    <label class="f">Notes (saved to the journal)<textarea id="tNotes" placeholder="Why you took it, plan, lessons…">${esc(trade.notes||'')}</textarea></label>
    <details><summary>Trade log (${trade.log.length})</summary><ul class="list" style="margin-top:8px">${trade.log.slice().reverse().map(x=>`<li><span class="t">${istStr(new Date(x.t),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span><span>${esc(x.txt)}</span></li>`).join('')}</ul></details>
@@ -784,10 +830,10 @@ function applyAdj(c){
 $('tradeBox').addEventListener('click',e=>{const t=e.target;
   if(t.dataset.apply!=null){applyAdj(adjList[+t.dataset.apply]);return}
   if(t.dataset.cl!=null){const l=trade.legs[+t.dataset.cl];applyAdj(mkAdj(`Close ${l.k} ${l.type}`,[{i:+t.dataset.cl,lots:l.lots}],[],''));return}
-  if(t.id==='tView'){legs=openLegs().map(l=>({on:true,side:l.side,type:l.type,k:l.k,lots:l.lots,px:l.px}));renderLegs();renderPos();$('legs').scrollIntoView({behavior:'smooth'});return}
+  if(t.id==='tView'){legs=openLegs().map(l=>({on:true,side:l.side,type:l.type,k:l.k,lots:l.lots,px:l.px}));renderLegs();renderPos();go('build');return}
   if(t.dataset.tsel){const nt=trades.find(x=>String(x.id)===t.dataset.tsel);if(nt&&nt!==trade){trade=nt;saveTrade();$('expiry').value=trade.expiry;refreshChain()}return}
   if(t.id==='tNotif'){try{Notification.requestPermission().then(()=>renderAll())}catch(err){}return}
-  if(t.id==='tExit'){if(t.dataset.armed){applyAdj(adjList[1])}else{t.dataset.armed='1';t.textContent='Tap again to confirm';setTimeout(()=>{if(t.isConnected){delete t.dataset.armed;t.textContent='Close trade at LTP'}},4000)}}
+  if(t.id==='tExit'){if(Date.now()<exitArmed){exitArmed=0;applyAdj(adjList[1])}else{exitArmed=Date.now()+5000;t.textContent='Tap again to confirm';setTimeout(()=>{const b=$('tExit');if(b&&Date.now()>=exitArmed)b.textContent=trade&&trade.mode==='paper'?'Close trade (paper)':'Close trade at LTP'},5100)}}
 });
 $('tradeBox').addEventListener('input',e=>{if(e.target.id==='tNotes'&&trade){trade.notes=e.target.value;saveTrade()}});
 $('tradeBox').addEventListener('change',e=>{const t=e.target;
@@ -822,10 +868,14 @@ function renderHist(){
   const avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null,t=(k,v,c='')=>`<div class="stat"><span>${k}</span><b class="${c}">${v}</b></div>`;
   let peak=0,run=0,dd=0;for(const x of pn.slice().reverse()){run+=x;peak=Math.max(peak,run);dd=Math.min(dd,run-peak)}
   const a=paperAcct();
-  $('jStats').innerHTML=t('Trades',list.length)+t('Win rate',list.length?Math.round(wins.length/list.length*100)+'%':'—')+t('Net P&L',inr(tot),cls(tot))+
+  $('jStats').innerHTML=t('Open',trades.length)+t('Closed',list.length)+t('Win rate',list.length?Math.round(wins.length/list.length*100)+'%':'—')+t('Net P&L',inr(tot),cls(tot))+
     t('Avg win',avg(wins)==null?'—':inr(avg(wins)),'pos')+t('Avg loss',avg(loss)==null?'—':inr(avg(loss)),'neg')+t('Max drawdown',inr(dd),dd<0?'neg':'')+
     (jFilter!=='real'?t('Paper balance',inr(a.bal),cls(a.bal-a.cap))+t('Paper free',inr(a.free)):'');
-  $('jList').innerHTML=list.length?list.map(h=>{
+  const openRows=trades.filter(t=>jFilter==='all'||(t.mode||'real')===jFilter).map(t=>{
+    const live=t===trade&&ch&&$('expiry').value===t.expiry,pl=live?booked()+openMTM():null,nl=t.legs.filter(l=>l.open).length;
+    return`<div class="jrow jopen"><div class="jsum"><span class="jd">${istStr(new Date(t.opened),{day:'numeric',month:'short'})}</span><span class="jn">${esc(t.name)} <span class="pill ${t.mode==='paper'?'model':'live'}" style="font-size:.6rem">${(t.mode||'real').toUpperCase()}</span> <span class="pill st-good" style="font-size:.6rem">OPEN</span><br><span class="t">${nl} open leg${nl===1?'':'s'} · ${t.log.filter(x=>x.adj).length} adj. · exp ${esc(t.expiry)}</span></span><span class="jp ${pl==null?'':cls(pl)}">${pl==null?'—':inr(pl)}</span></div>
+      <div class="toolbar" style="padding:0 10px 8px"><button class="sm" data-jopen="${t.id}">Manage</button></div></div>`}).join('');
+  $('jList').innerHTML=openRows+(list.length?list.map(h=>{
     const legsTxt=(h.legs||[]).map(l=>`<li>${l.side==='B'?'Buy':'Sell'} ${l.lots}× ${l.type==='FUT'?'FUT':l.k+' '+l.type} @ ${num(l.px)} → ${l.exit!=null?num(l.exit):'—'} <span class="${cls(sgn(l)*((l.exit??l.px)-l.px))}">${inr(sgn(l)*((l.exit??l.px)-l.px)*l.lots*lot())}</span></li>`).join('');
     const e=h.entry||{};
     return`<details class="jrow"><summary><span class="jd">${istStr(new Date(h.opened||h.closed),{day:'numeric',month:'short'})}</span><span class="jn">${esc(h.name)} <span class="pill ${h.mode==='paper'?'model':'live'}" style="font-size:.6rem">${(h.mode||'real').toUpperCase()}</span></span><span class="jp ${cls(h.pnl)}">${inr(h.pnl)}</span></summary>
@@ -835,8 +885,10 @@ function renderHist(){
         ${legsTxt?`<ul class="orders" style="list-style:none;padding:0">${legsTxt}</ul>`:''}
         ${h.notes?`<p class="note" style="color:var(--fg)">Notes: ${esc(h.notes)}</p>`:''}
         ${h.log?`<ul class="list">${h.log.map(x=>`<li><span class="t">${istStr(new Date(x.t),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}</span><span>${esc(x.txt)}</span></li>`).join('')}</ul>`:''}
-      </div></details>`}).join(''):'<p class="note">No closed trades yet. Take a trade (paper or real) and it will be recorded here when it closes, with every leg, adjustment and the final P&L.</p>';
+      </div></details>`}).join(''):(openRows?'':'<p class="note">No trades yet. Take a trade (paper or real) from Market, Builder or Find. It shows here straight away as OPEN and stays in the log after it closes, with every leg, adjustment and the final P&L.</p>'));
 }
+$('jList').addEventListener('click',e=>{const id=e.target.dataset.jopen;if(!id)return;const t=trades.find(x=>String(x.id)===id);if(!t)return;
+  if(t!==trade){trade=t;saveTrade();$('expiry').value=t.expiry;refreshChain()}window.scrollTo({top:0,behavior:'smooth'})});
 $('jFilt').addEventListener('click',e=>{const f=e.target.dataset.jf;if(!f)return;jFilter=f;[...$('jFilt').children].forEach(b=>b.classList.toggle('on',b.dataset.jf===f));renderHist()});
 function saveFile(name,text,type){try{const b=new Blob([text],{type}),u=URL.createObjectURL(b),a=document.createElement('a');a.href=u;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(u),4000)}catch(e){notify('Download is not available here. Open the app from GitHub Pages to export.')}}
 $('jCsv').onclick=()=>{
@@ -853,6 +905,42 @@ $('jImp').addEventListener('change',async e=>{const f=e.target.files[0];if(!f)re
     if(!trade)trade=trades[0]||null;saveTrade();renderAll();notify(`Restored ${n} trade${n===1?'':'s'} from backup.`)}catch(err){notify('That file is not a journal backup.')}
   e.target.value=''});
 try{navigator.storage&&navigator.storage.persist&&navigator.storage.persist()}catch(e){}
+
+// ---------------- sync open trades + journal across devices via a private GitHub gist ----------------
+const SYNC_FILE='nifty-trades.json',SYNC_DESC='Nifty Strategy Builder sync (private)';
+let syncBusy=false,syncT=null;
+const setSync=t=>{$('syncSt').textContent=t;const j=$('jSync');if(j)j.textContent=t};
+async function gh(path,opt={}){
+  const r=await fetch('https://api.github.com'+path,{...opt,cache:'no-store',headers:{'Authorization':'token '+cfg.ghToken,'Accept':'application/vnd.github+json',...(opt.body?{'Content-Type':'application/json'}:{})}});
+  if(!r.ok)throw new Error(r.status===401?'token rejected (check it has gist scope)':r.status===404?'gist not found':'GitHub error '+r.status);return r.json()}
+async function findGist(){
+  if(cfg.gistId)return cfg.gistId;
+  for(let p=1;p<=5;p++){const list=await gh('/gists?per_page=100&page='+p);const g=list.find(x=>x.files&&x.files[SYNC_FILE]);
+    if(g){cfg.gistId=g.id;store.set('cfg',cfg);return g.id}if(list.length<100)break}
+  const g=await gh('/gists',{method:'POST',body:JSON.stringify({description:SYNC_DESC,public:false,files:{[SYNC_FILE]:{content:JSON.stringify({v:1,trades:[],hist:[]})}}})});
+  cfg.gistId=g.id;store.set('cfg',cfg);return g.id}
+function mergeIn(rem){
+  const key=h=>h.id+'|'+h.closed,hk=new Set(hist.map(key));
+  for(const h of rem.hist||[])if(!hk.has(key(h))){hist.push(h);hk.add(key(h))}
+  hist.sort((a,b)=>b.closed-a.closed);
+  const closed=new Set(hist.map(h=>h.id)),m=new Map();
+  for(const t of[...trades,...(rem.trades||[])]){if(closed.has(t.id))continue;const o=m.get(t.id);if(!o||(t.upd||t.opened)>(o.upd||o.opened))m.set(t.id,t)}
+  const sel=trade&&trade.id;trades=[...m.values()].sort((a,b)=>a.opened-b.opened);trade=trades.find(t=>t.id===sel)||trades[0]||null;
+  store.set('trades',trades);store.set('selTrade',trade?trade.id:0);store.set('hist',hist)}
+async function syncNow(){
+  if(!cfg.ghToken){setSync('Not syncing: add a GitHub token in Settings to share trades between devices.');return}
+  if(syncBusy)return;syncBusy=true;setSync('Syncing…');
+  try{
+    let id;try{id=await findGist();var g=await gh('/gists/'+id)}catch(e){if(/not found/.test(e.message)){cfg.gistId='';store.set('cfg',cfg);id=await findGist();g=await gh('/gists/'+id)}else throw e}
+    const f=g.files[SYNC_FILE];let rem={};
+    if(f){let c=f.content;if(f.truncated)c=await(await fetch(f.raw_url,{cache:'no-store'})).text();try{rem=JSON.parse(c)}catch(e){}}
+    const before=JSON.stringify([trades.map(t=>[t.id,t.upd]),hist.length]),exp=trade&&trade.expiry;
+    mergeIn(rem);
+    await gh('/gists/'+id,{method:'PATCH',body:JSON.stringify({files:{[SYNC_FILE]:{content:JSON.stringify({v:1,saved:Date.now(),trades,hist})}}})});
+    setSync('Synced '+istStr(new Date(),{hour:'2-digit',minute:'2-digit'})+' IST · '+trades.length+' open, '+hist.length+' in journal');
+    if(JSON.stringify([trades.map(t=>[t.id,t.upd]),hist.length])!==before&&mkt){if(trade&&trade.expiry!==exp){$('expiry').value=trade.expiry;refreshChain()}else renderAll()}
+  }catch(e){setSync('Sync failed: '+e.message)}finally{syncBusy=false}}
+const scheduleSync=()=>{clearTimeout(syncT);syncT=setTimeout(syncNow,3000)};
 
 // ---------------- Draw your payoff: sketch a shape, find matching strikes ----------------
 const DN=60;let dT=new Array(DN+1).fill(null),dRes=[],dSel=0,dView=null,dDrawing=false,dLast=null;
@@ -986,7 +1074,7 @@ $('dFind').onclick=()=>{
 };
 $('dRes').addEventListener('click',e=>{const t=e.target;
   if(t.dataset.dtake!=null){const m=dRes[+t.dataset.dtake];takeTrade(t,nameOf(m.legs),m.legs);return}
-  if(t.dataset.dload!=null){legs=dRes[+t.dataset.dload].legs.map(l=>({...l}));renderLegs();renderPos();$('legs').scrollIntoView({behavior:'smooth',block:'start'});return}
+  if(t.dataset.dload!=null){legs=dRes[+t.dataset.dload].legs.map(l=>({...l}));renderLegs();renderPos();go('build');return}
   const card=t.closest('[data-dsel]');if(card){dSel=+card.dataset.dsel;[...$('dRes').querySelectorAll('[data-dsel]')].forEach(c=>c.classList.toggle('top',c===card));drawPad()}});
 
 // ---------------- free-form optimizer: any number of legs, any buy/sell mix ----------------
@@ -1138,7 +1226,7 @@ $('tgFind').onclick=()=>{
 let tgList=[];
 $('tgRes').addEventListener('click',e=>{const t=e.target;
   if(t.dataset.tgtake!=null){const c=tgList[+t.dataset.tgtake];takeTrade(t,c.fam,c.legs);return}
-  if(t.dataset.tgload!=null){legs=tgList[+t.dataset.tgload].legs.map(l=>({...l}));renderLegs();renderPos();$('legs').scrollIntoView({behavior:'smooth',block:'start'})}});
+  if(t.dataset.tgload!=null){legs=tgList[+t.dataset.tgload].legs.map(l=>({...l}));renderLegs();renderPos();go('build')}});
 $('tgUnl').addEventListener('change',()=>{$('tgProfit').disabled=$('tgUnl').checked});
 ['tgLoss','tgProfit','tgView','tgPop'].forEach(id=>$(id).addEventListener('change',()=>{try{localStorage.setItem('nosb2.tg',JSON.stringify({l:$('tgLoss').value,p:$('tgProfit').value,v:$('tgView').value,q:$('tgPop').value}))}catch(e){}}));
 try{const t=JSON.parse(localStorage.getItem('nosb2.tg')||'null');if(t){$('tgLoss').value=t.l;$('tgProfit').value=t.p;$('tgView').value=t.v;if(t.q!=null)$('tgPop').value=t.q}}catch(e){}
@@ -1161,6 +1249,19 @@ function capital(ls){
   return{paid,recv,margin,charges,total:margin+charges,naked}
 }
 const capTxt=ls=>{const c=capital(ls);return`<span title="Premium paid ${inr(c.paid)} · received ${inr(c.recv)} · charges ${inr(c.charges)}">Funds needed ≈ <b>${inr(c.total)}</b>${c.naked?' <span class="mut">(naked short, est.)</span>':''}</span>`};
+
+// ---------------- pages ----------------
+const PAGES=['market','build','find','trades','settings'];
+function go(pg,noScroll){
+  if(!PAGES.includes(pg))pg='market';
+  document.querySelectorAll('.page').forEach(el=>el.hidden=el.dataset.page!==pg);
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.go===pg));
+  store.set('page',pg);try{if(location.hash!=='#'+pg)history.replaceState(null,'','#'+pg)}catch(e){}
+  if(!noScroll)window.scrollTo(0,0);
+  if(mkt){if(pg==='build')renderPos();if(pg==='find')drawPad()}
+}
+$('tabs').addEventListener('click',e=>{const b=e.target.closest('[data-go]');if(b)go(b.dataset.go)});
+window.addEventListener('hashchange',()=>go(location.hash.slice(1),true));
 
 // ---------------- P&L ----------------
 const sgn=l=>l.side==='B'?1:-1;
@@ -1242,7 +1343,7 @@ function renderSugs(f){
   $('sugs').innerHTML=h;
 }
 $('sugs').addEventListener('click',e=>{if(e.target.dataset.take!=null){const s=sugList[+e.target.dataset.take];takeTrade(e.target,s.name,s.legs);return}const i=e.target.dataset.load;if(i==null)return;legs=sugList[+i].legs.map(l=>({...l}));renderLegs();renderPos();
-  document.getElementById('legs').scrollIntoView({behavior:'smooth',block:'start'})});
+  go('build')});
 
 function renderEvents(f){
   const exp=expDate($('expiry').value),now=Date.now();
@@ -1316,6 +1417,7 @@ function renderPos(){
   $('dfw').max=Math.max(Math.floor(d*4)/4,0);if(+$('dfw').value>+$('dfw').max)$('dfw').value=$('dfw').max;
   $('dfwO').textContent=(+$('dfw').value).toFixed(2)+'d';$('ivsO').textContent=(+$('ivs').value>0?'+':'')+$('ivs').value+'%';
   const cv=$('cv');
+  document.querySelectorAll('.chartbits').forEach(el=>el.hidden=!ls.length);
   if(!ls.length){$('stats').innerHTML='';$('tbl').innerHTML='';cv.getContext('2d').clearRect(0,0,cv.width,cv.height);view=null;return}
   const a=analyse(ls),s=(k,v,c='')=>`<div class="stat"><span>${k}</span><b class="${c}">${v}</b></div>`;
   $('stats').innerHTML=s('Live MTM',inr(a.mtm),cls(a.mtm))+s('Max profit',inr(a.mx),'pos')+s('Max loss',inr(a.mn),'neg')+
@@ -1376,11 +1478,15 @@ window.addEventListener('resize',()=>{if(mkt){renderPos();drawPad()}});
 function bindSetting(id,key,parse){const el=$(id);el.value=cfg[key];el.addEventListener('change',()=>{cfg[key]=parse(el.value)||DEF[key];el.value=cfg[key];store.set('cfg',cfg);
   if(key==='worker'){expiriesTried=false;refreshAll()}else if(mkt){enrichChain();renderAll()}})}
 cfg={...DEF,...store.get('cfg',{})};legs=store.get('legs',[]);
-bindSetting('wurl','worker',s=>s.trim());bindSetting('lot','lot',Number);bindSetting('rate','rate',Number);bindSetting('budget','budget',Number);bindSetting('charges','charges',Number);bindSetting('paperCap','paperCap',Number);
+bindSetting('wurl','worker',s=>s.trim());bindSetting('lot','lot',Number);bindSetting('rate','rate',Number);bindSetting('budget','budget',Number);bindSetting('charges','charges',Number);bindSetting('paperCap','paperCap',Number);bindSetting('ghToken','ghToken',x=>x.trim());
+$('ghToken').addEventListener('change',()=>{cfg.gistId='';store.set('cfg',cfg);syncNow()});$('syncBtn').onclick=()=>syncNow();
 
 (async()=>{
+  go(location.hash.slice(1)||store.get('page','market'),true);
   $('expiry').innerHTML=tuesdays(6).map(s=>`<option>${s}</option>`).join('');
-  await refreshAll();
+  await refreshAll();renderLegs();renderPos();
+  syncNow();setInterval(()=>{if(!document.hidden)syncNow()},60000);
+  document.addEventListener('visibilitychange',()=>{if(!document.hidden)syncNow()});
   setInterval(()=>{if(marketOpen()&&!document.hidden)refreshChain()},15000);
   setInterval(()=>{if(!document.hidden){loadContext().then(()=>{if(mkt)renderAll()})}},300000);
   document.addEventListener('visibilitychange',()=>{if(!document.hidden&&marketOpen())refreshChain()});
